@@ -319,6 +319,8 @@ test("resolveClaudeNativePort: env only, undefined without an explicit override 
 // true (garbage leaves the gate closed); default false.
 test("resolveNativeAttachExternal: env parsing (1/true open, 0/false close, junk falls through)", () => {
     const prev = process.env.XDG_CONFIG_HOME;
+    const prevCfgFile = process.env.BILI_CONFIG_FILE;
+    delete process.env.BILI_CONFIG_FILE; // #5107 hermetic preload sets it ambiently; these subtests resolve via XDG
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bili-attachext-"));
     process.env.XDG_CONFIG_HOME = dir;
     try {
@@ -333,12 +335,16 @@ test("resolveNativeAttachExternal: env parsing (1/true open, 0/false close, junk
     } finally {
         if (prev === undefined) delete process.env.XDG_CONFIG_HOME;
         else process.env.XDG_CONFIG_HOME = prev;
+        if (prevCfgFile === undefined) delete process.env.BILI_CONFIG_FILE;
+        else process.env.BILI_CONFIG_FILE = prevCfgFile;
         rmrf(dir);
     }
 });
 
 test("resolveNativeAttachExternal: file native.attachExternal requires exact true; env still wins", () => {
     const prev = process.env.XDG_CONFIG_HOME;
+    const prevCfgFile = process.env.BILI_CONFIG_FILE;
+    delete process.env.BILI_CONFIG_FILE; // #5107 hermetic preload sets it ambiently; these subtests resolve via XDG
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bili-attachext-"));
     const cfgDir = path.join(dir, "billion-context");
     fs.mkdirSync(cfgDir, { recursive: true });
@@ -360,12 +366,16 @@ test("resolveNativeAttachExternal: file native.attachExternal requires exact tru
     } finally {
         if (prev === undefined) delete process.env.XDG_CONFIG_HOME;
         else process.env.XDG_CONFIG_HOME = prev;
+        if (prevCfgFile === undefined) delete process.env.BILI_CONFIG_FILE;
+        else process.env.BILI_CONFIG_FILE = prevCfgFile;
         rmrf(dir);
     }
 });
 
 test("resolveNativeAttachLanePriority: ordered unique list; garbage degrades to [] (#2905)", () => {
     const prev = process.env.XDG_CONFIG_HOME;
+    const prevCfgFile = process.env.BILI_CONFIG_FILE;
+    delete process.env.BILI_CONFIG_FILE; // #5107 hermetic preload sets it ambiently; these subtests resolve via XDG
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bili-laneprio-"));
     const cfgDir = path.join(dir, "billion-context");
     fs.mkdirSync(cfgDir, { recursive: true });
@@ -382,6 +392,8 @@ test("resolveNativeAttachLanePriority: ordered unique list; garbage degrades to 
     } finally {
         if (prev === undefined) delete process.env.XDG_CONFIG_HOME;
         else process.env.XDG_CONFIG_HOME = prev;
+        if (prevCfgFile === undefined) delete process.env.BILI_CONFIG_FILE;
+        else process.env.BILI_CONFIG_FILE = prevCfgFile;
         rmrf(dir);
     }
 });
@@ -391,6 +403,8 @@ test("resolveNativeAttachLanePriority: ordered unique list; garbage degrades to 
 // attachUrl unset unless an explicit origin is pinned.
 test("resolveNativeAttachPolicy: default own-lane; env/file select global-fallback", () => {
     const prev = process.env.XDG_CONFIG_HOME;
+    const prevCfgFile = process.env.BILI_CONFIG_FILE;
+    delete process.env.BILI_CONFIG_FILE; // #5107 hermetic preload sets it ambiently; these subtests resolve via XDG
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bili-attachpol-"));
     const cfgDir = path.join(dir, "billion-context");
     fs.mkdirSync(cfgDir, { recursive: true });
@@ -417,12 +431,16 @@ test("resolveNativeAttachPolicy: default own-lane; env/file select global-fallba
     } finally {
         if (prev === undefined) delete process.env.XDG_CONFIG_HOME;
         else process.env.XDG_CONFIG_HOME = prev;
+        if (prevCfgFile === undefined) delete process.env.BILI_CONFIG_FILE;
+        else process.env.BILI_CONFIG_FILE = prevCfgFile;
         rmrf(dir);
     }
 });
 
 test("resolveNativeAttachUrl: env BILI_MCP_PROXY wins over file native.attachUrl; blank → unset", () => {
     const prev = process.env.XDG_CONFIG_HOME;
+    const prevCfgFile = process.env.BILI_CONFIG_FILE;
+    delete process.env.BILI_CONFIG_FILE; // #5107 hermetic preload sets it ambiently; these subtests resolve via XDG
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bili-attachurl-"));
     const cfgDir = path.join(dir, "billion-context");
     fs.mkdirSync(cfgDir, { recursive: true });
@@ -445,6 +463,8 @@ test("resolveNativeAttachUrl: env BILI_MCP_PROXY wins over file native.attachUrl
     } finally {
         if (prev === undefined) delete process.env.XDG_CONFIG_HOME;
         else process.env.XDG_CONFIG_HOME = prev;
+        if (prevCfgFile === undefined) delete process.env.BILI_CONFIG_FILE;
+        else process.env.BILI_CONFIG_FILE = prevCfgFile;
         rmrf(dir);
     }
 });

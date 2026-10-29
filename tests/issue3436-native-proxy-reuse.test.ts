@@ -28,13 +28,16 @@ function tmpHome(): { dir: string; restore: () => void } {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bili-3436-home-"));
     const prevCfg = process.env.XDG_CONFIG_HOME;
     const prevState = process.env.XDG_STATE_HOME;
+    const prevFile = process.env.BILI_CONFIG_FILE;
     process.env.XDG_CONFIG_HOME = dir;
     process.env.XDG_STATE_HOME = dir;
+    delete process.env.BILI_CONFIG_FILE; // #5107 hermetic preload sets it ambiently; these tests resolve via XDG
     return {
         dir,
         restore: () => {
             if (prevCfg === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = prevCfg;
             if (prevState === undefined) delete process.env.XDG_STATE_HOME; else process.env.XDG_STATE_HOME = prevState;
+            if (prevFile === undefined) delete process.env.BILI_CONFIG_FILE; else process.env.BILI_CONFIG_FILE = prevFile;
         },
     };
 }
