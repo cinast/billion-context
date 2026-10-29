@@ -280,7 +280,7 @@ const METADATA_EXPECTED_REBASE_NOTED = "foldExpectedRebaseNoted";
  *  plain-text pairing had not aligned yet (array count/order churn broke the
  *  slot this pass) — retried on later passes until paired or the id returns
  *  verbatim. */
-const METADATA_OFFLOAD_PENDING = "foldOffloadPending";
+export const METADATA_OFFLOAD_PENDING = "foldOffloadPending";
 const MAX_REBASE_LOOKUP_PER_PASS = 256;
 const MAX_REBASE_MEMO = 8192;
 
