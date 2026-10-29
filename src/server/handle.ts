@@ -33,7 +33,7 @@ import { enterSessionContext, log as loggerLog } from "../logger.js";
 import { codexCompactGatePre, codexCompactMode, hasCompactionTrigger, isCodexHost, replaceBiliCompactionItems } from "../codex-compact.js";
 import { emitPreflightError } from "../stream-error.js";
 import { agentProviderRecipes } from "../agent-providers.js";
-import { affinityToken, claudeAnthropicPersonaOrderApplies, conversationHeaderSource, claudeSubagentAgentId, claudeSubagentSplit, clientConversationHeader, codexTurnIdentity, dshPersonaFingerprintApplies, instructionsFingerprintApplies, openaiSystemTextForPersona, preferPromptCacheKeyIdentity } from "../session-id.js";
+import { affinityToken, anthropicFirstUserFrag, claudeAnthropicPersonaOrderApplies, conversationHeaderSource, claudeSubagentAgentId, claudeSubagentSplit, clientConversationHeader, codexTurnIdentity, dshPersonaFingerprintApplies, instructionsFingerprintApplies, openaiSystemTextForPersona, preferPromptCacheKeyIdentity } from "../session-id.js";
 import { personaConversationOrder } from "../session-resolve.js";
 import { prefixAffinity, describeResumeMiss, type AnonymousAffinity } from "../prefix-affinity.js";
 import { buildAnonymousProvenance, type AnonymousProvenance } from "../anon-provenance.js";
@@ -1102,11 +1102,19 @@ async function handleRequest(
                        // ride forks onto its own |sub:<fp> lane while a
                        // continuing main conversation keeps the raw key on
                        // order+content evidence (#2944).
+                       // #5095 D1-B: same-type re-dispatched runs of a
+                       // header-less subagent share their system byte-for-byte,
+                       // so the persona tag alone is not injective over RUNS —
+                       // pass the dispatch task prompt (first user message)
+                       // as the per-run discriminator so the fork key becomes
+                       // |sub:<fp>:<userFp>; empty fragment degrades to the
+                       // two-segment key. NO other call site passes one.
                        ? personaConversationOrder(
                            anthropicIdentity?.value ?? anthropicSignal,
                            (parsed as AnthropicRequestBody).messages,
                            personaSystemText,
                            pluginReportedModel(req.headers),
+                           anthropicFirstUserFrag((parsed as AnthropicRequestBody).messages),
                          )
                        : anthropicIdentity?.value ?? anthropicSignal)
              : protocol === "openai"

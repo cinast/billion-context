@@ -210,8 +210,17 @@ function record(rawId: string, turns: NeutralTurn[], tagHash: string, model?: st
  *  #4778) migrates too; only a tag change with NO positional continuation
  *  evidence forks onto `<rawId>|sub:<fp16(tag)>` — byte-identical to the
  *  old ladder's fork keys, so persisted fork lanes keep their sessions
- *  across the upgrade. */
-export function resolveSessionOrder(rawId: string, history: unknown, personaTag?: string, declaredModel?: string): SessionOrderResolution {
+ *  across the upgrade.
+ *
+ *  `laneDiscriminator` (#5095 D1-B, optional): a per-run identity consumed by
+ *  ONLY the derived-persona fork branch. The claude-anthropic headless-
+ *  subagent call site passes the dispatch's task prompt (first user message
+ *  fragment): same-type subagents re-dispatched under one parent id share
+ *  their system byte-for-byte, so (id, persona) alone is not injective over
+ *  RUNS. A non-empty discriminator widens the fork key to
+ *  `<rawId>|sub:<fp16(tag)>:<fp16(disc)>`; every other caller omits it and
+ *  keeps the byte-identical two-segment key. */
+export function resolveSessionOrder(rawId: string, history: unknown, personaTag?: string, declaredModel?: string, laneDiscriminator?: string): SessionOrderResolution {
     const list = Array.isArray(history) ? (history as unknown[]) : [];
     const turns = neutralTurns(list);
     const kinds = turns.map((t) => t.kind);
@@ -219,6 +228,7 @@ export function resolveSessionOrder(rawId: string, history: unknown, personaTag?
     const tag = personaTag !== undefined && personaTag.trim().length > 0 ? personaTag : "";
     const tagHash = tagHashOf(tag);
     const model = declaredModel !== undefined && declaredModel.trim().length > 0 ? declaredModel.trim() : undefined;
+    const disc = laneDiscriminator !== undefined && laneDiscriminator.trim().length > 0 ? laneDiscriminator.trim() : "";
     const recorded = skeletons.get(rawId);
     if (recorded === undefined) {
         // First sight under the id. A main-shaped history claims the raw
@@ -315,7 +325,11 @@ export function resolveSessionOrder(rawId: string, history: unknown, personaTag?
             record(rawId, turns, tagHash, effectiveModel);
             return { key: rawId, action: "reanchor", reason: "persona text changed but the recorded history continues inside the incoming — anchor migrated (#4778)" };
         }
-        const laneKey = `${rawId}|sub:${fp16(tag)}`;
+        // #5095 D1-B: a non-empty discriminator (only the claude-anthropic
+        // headless-subagent call site passes one) widens the key into a
+        // three-segment form so distinct same-type runs never share a
+        // compression session; empty degrades to the two-segment key.
+        const laneKey = disc !== "" ? `${rawId}|sub:${fp16(tag)}:${fp16(disc)}` : `${rawId}|sub:${fp16(tag)}`;
         record(laneKey, turns, tagHash, model);
         return { key: laneKey, action: "derived-persona", reason: "persona text changed without continuing history — persona lane" };
     }
@@ -416,6 +430,6 @@ export function applyOrderSnapshot(entries: OrderSkeletonEntry[]): number {
  *  ladder consumed (systemText, model) and keyed by system-hash; the v2
  *  resolver is content-blind and keys by order+id with fragment guards,
  *  so those parameters are simply gone. */
-export function personaConversationOrder(rawId: string, history: unknown, personaTag?: string, declaredModel?: string): string {
-    return resolveSessionOrder(rawId, history, personaTag ?? "", declaredModel).key;
+export function personaConversationOrder(rawId: string, history: unknown, personaTag?: string, declaredModel?: string, laneDiscriminator?: string): string {
+    return resolveSessionOrder(rawId, history, personaTag ?? "", declaredModel, laneDiscriminator).key;
 }
