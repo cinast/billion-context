@@ -22,6 +22,7 @@
  */
 
 import { log as loggerLog } from "../logger.js";
+import { integrityLabelDiagnosis } from "../integrity-label.ts";
 import { planIngest, planIngestDelta, loadLegacyView, completeBlockContents, type LegacySessionLike } from "./ingest.ts";
 import type { BlockView } from "../session.js";
 import { resolveStorageMode, resolveStorageWalJournalSizeLimit, type StorageMode } from "../knobs.ts";
@@ -53,20 +54,22 @@ export const VERIFY_EVERY_INGESTS = 20;
  *  every save, and the first clean sample re-admits the session. */
 export const DRIFT_ESCALATE_STREAK = 3;
 
-/** #3823: on win32 "unable to open database file" (SQLITE_CANTOPEN) is almost
- * always an OS-level refusal — antivirus/Defender holding the dir, OneDrive
- * placeholder files under the profile dir, a path past MAX_PATH, or a
- * restricted/sandboxed process whose writes Windows integrity control refuses
- * (#3823 field report: a DSH-launched child at low integrity hit exactly this
- * class on its CA bundle) — NOT a corrupt index.db, so the generic "delete
- * the file" recovery advice misleads for that class; name the real suspects
- * instead. Empty elsewhere: every field instance of this failure domain is
- * win32-x64 (#3338/#3385/#3788/#3823), and Linux/macOS CANTOPEN causes
- * (permissions, disk full) are too varied to hint at usefully. */
+/** #3823/#5155: on win32 "unable to open database file" (SQLITE_CANTOPEN) and
+ * "attempt to write a readonly database" (open succeeded, first WRITE refused
+ * — #4614/#5103 field shape) are almost always OS-level refusals, NOT a
+ * corrupt index.db, so the generic "delete the file" recovery advice misleads
+ * for that class; name the real suspects instead, in evidence order. #5155's
+ * reproducible A/B made the node runtime's mandatory integrity label the FIRST
+ * suspect: a Low-labeled node.exe cannot write Medium files even with correct
+ * ACLs, and relabeling it fixed the whole EPERM class with zero AV change —
+ * while Defender/OneDrive/MAX_PATH remain possible but unproven in that field
+ * case, so they rank after. Empty elsewhere: every field instance of this
+ * failure domain is win32-x64 (#3338/#3385/#3788/#3823), and Linux/macOS
+ * CANTOPEN causes (permissions, disk full) are too varied to hint at usefully. */
 export function sqliteOpenFailureHint(err: string): string {
     if (process.platform !== "win32") return "";
-    if (!/unable to open database file/i.test(err)) return "";
-    return " (win32: the OS refused to open the file — usually antivirus/Defender locking the sessions dir, OneDrive placeholder files under the profile dir, a path over 260 chars, or a restricted/sandboxed process (low-integrity label, app container) whose writes Windows integrity control refuses; exclude %USERPROFILE%\\.local\\share\\billion-context\\ from antivirus real-time scanning first; deleting the file will not clear a lock)";
+    if (!/unable to open database file|attempt to write a readonly database/i.test(err)) return "";
+    return ` (win32: the OS refused access to the database file — check in order: (1) the node runtime's NTFS mandatory integrity label — ${integrityLabelDiagnosis(process.execPath)}; (2) antivirus/Defender locking the sessions dir or OneDrive placeholder files — exclude %USERPROFILE%\\.local\\share\\billion-context\\ from antivirus real-time scanning; (3) a path over 260 chars. Deleting the file will not clear an OS-level refusal)`;
 }
 
 // Canonical home for StorageMode/resolveStorageMode is src/knobs.ts (env-var

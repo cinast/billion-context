@@ -30,6 +30,7 @@ import { ensureSqliteEngine } from "./storage/engine-bootstrap.js";
 import { recordEngineBootstrap } from "./storage/runtime-status.js";
 import { configFile as defaultConfigFile } from "./paths.js";
 import { log as loggerLog } from "./logger.js";
+import { runIntegritySelfCheck } from "./integrity-selfcheck.js";
 import { createAutoRestartHandler } from "./restart.js";
 import { checkForUpdate, startAutoUpdate } from "./update.js";
 import { registerUpdateActions } from "./server/update-actions.js";
@@ -714,6 +715,9 @@ export async function main(): Promise<void> {
     // than a bare error. No-op if it already exists.
     ensureConfigTemplate();
     const opts = loadOptions();
+    // #5155: win32-only, non-blocking probe of THIS runtime's integrity label
+    // (a demoted node.exe EPERMs every data write pre-listen); fails open.
+    runIntegritySelfCheck();
     // #2833: SQLite engine self-bootstrap — bounded (60s budget, #3338) and fail-safe; only
     // fetches when unified storage is requested AND no builtin/host engine
     // exists, so the common case costs nothing. Must complete before the first

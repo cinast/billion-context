@@ -2475,7 +2475,7 @@ billion-context detects this via the `instructions` field: subagent requests car
 
 billion-context persists each session's compression state to one JSON file per session under the sessions dir (`%USERPROFILE%\.local\share\billion-context\` by default) and rewrites that file on every turn of a long session. On Windows, real-time antivirus (Windows Defender), the search indexer, or a sync tool (OneDrive) can lock that directory mid-write. When the lock holds across several writes, the rename fails with `EPERM` and every persist for that session fails until the lock is cleared.
 
-The same environment failures can refuse to open the unified-storage index itself: when SQLite cannot open `%USERPROFILE%\.local\share\billion-context\sessions\index.db` (`unable to open database file` / SQLITE_CANTOPEN, #3823), storage degrades to legacy-only and the degrade warning plus the diagnostics block name this exclusion as the first suspect (OneDrive placeholder files and paths over 260 chars are the other two).
+The same environment failures can refuse access to the unified-storage index itself: when SQLite cannot open `%USERPROFILE%\.local\share\billion-context\sessions\index.db` (`unable to open database file` / SQLITE_CANTOPEN, #3823) or refuses the first WRITE into an opened database (`attempt to write a readonly database`, #4614/#5103), storage degrades to legacy-only and the degrade warning plus the diagnostics block name the suspects in evidence order — the node runtime's NTFS integrity label first ([see below](#windows-node-runtime-demoted-to-low-integrity-5155)), then this AV exclusion, then OneDrive placeholder files and paths over 260 chars.
 
 When the same session fails N consecutive writes (default `5`, tunable via `BILI_PERSIST_EPERM_ALERT_THRESHOLD`), the proxy logs a **one-time, actionable alert** naming the exact directory to exclude. It does not repeat (set `BILI_PERSIST_EPERM_ALERT_REPEAT_MS > 0` to re-alert at most every M minutes while the failures continue).
 
@@ -2485,3 +2485,25 @@ To stop the failures at the root, add the sessions dir to your antivirus exclusi
 2. **Do not sync this directory.** Make sure OneDrive (or Dropbox / Google Drive / similar) is not syncing `%USERPROFILE%\.local\share\billion-context\`. If it lives under a synced folder, relocate it with `BILI_SESSIONS_DIR` to a non-synced path.
 
 High-frequency persist writes otherwise re-trigger the real-time scan on every turn — which is what produces the `EPERM` write failures. Once the directory is excluded, the alerts stop.
+
+### Windows: node runtime demoted to low integrity (#5155)
+
+A second win32 failure class looks exactly like an antivirus lock but is not one: **every** write bili makes into its own data files (`ca\combined-ca.pem`, `sessions\index.db`, the session JSONs, `bili.log`) dies with `EPERM: operation not permitted` (errno -4048), while reads work fine and `Get-Acl` shows no Deny entry anywhere up the tree. The switch is the **NTFS mandatory integrity label on the node executable itself**: Windows initializes each process token's integrity level from the image file's label, and a Low-integrity process cannot write Medium-labeled files even with full-control ACLs (MIC no-write-up). Field A/B (#5155): relabeling the runtime Low reproduced the entire crash loop 4/4; relabeling it back to Medium fixed everything with zero AV/ACL change and no reboot.
+
+The typical source is a **Low-labeled parent directory** (an install tree under e.g. `E:\devtools\...`) whose `(OI)(CI)` inheritance stamps every node.exe inside it with `Low (I)(NW)`. Check and fix:
+
+```powershell
+# 1) see the runtime's effective label (look for the "Mandatory Label\" line)
+icacls "C:\Program Files\nodejs\node.exe"
+
+# 2) if it says Low Mandatory Level — restore Medium on the runtime itself
+icacls "C:\Program Files\nodejs\node.exe" /setintegritylevel Medium
+
+# 3) if the label shows "(I)" (inherited), one NON-recursive relabel of the
+#    parent directory converges the whole tree — no /T, no recursion
+icacls "E:\devtools\dsh" /setintegritylevel Medium
+```
+
+Then restart dsh/bili. `bili start` also self-checks this at boot: when the runtime runs at Low/Very Low integrity, a prominent `[integrity] this node runtime runs at "Low" integrity …` warn names the cause and the exact commands before the first data write fails (non-blocking; the check fails open silently if it cannot read the label).
+
+**Do not** "fix" this the other way — recursively lowering bili's data directories (`icacls <data-dir> /setintegritylevel "(OI)(CI)Low" /T`) so the demoted runtime can keep writing them: that drags `index.db`, logs and session envelopes down to Low as well, and leaves those dirs unwritable by normal Medium processes. That was the #4614 interim workaround; #5155's evidence supersedes it as the recommended direction (it remains a valid stopgap only when the runtime genuinely cannot be relabeled).

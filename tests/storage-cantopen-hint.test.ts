@@ -9,15 +9,19 @@ import { SessionStore } from "../src/persist.ts";
 import { rmrf } from "./tmp-rm.ts";
 
 /**
- * #3823: on win32, CANTOPEN ("unable to open database file") at index.db open
- * time is almost always an OS-level environment refusal (AV/Defender lock,
- * OneDrive placeholder files, MAX_PATH) — NOT a corrupt file, so the generic
+ * #3823/#5155: on win32, CANTOPEN ("unable to open database file") and
+ * READONLY-write ("attempt to write a readonly database" — open succeeded,
+ * first write refused, #4614/#5103 field shape) at index.db time are almost
+ * always OS-level environment refusals — NOT a corrupt file, so the generic
  * "delete the file to reset the index" advice misleads for that class. The
- * hint fires exactly when win32 && CANTOPEN and stays silent otherwise —
- * both directions pinned (#3617 gate discipline).
+ * hint fires exactly when win32 && (CANTOPEN || READONLY-write) and stays
+ * silent otherwise — both directions pinned (#3617 gate discipline). #5155's
+ * reproducible A/B made the node runtime's Low integrity label the FIRST
+ * suspect (copy-pasteable icacls remedy embedded); antivirus ranks after.
  */
 
 const CANT_OPEN = "Error: [storage:node:sqlite] Error: unable to open database file";
+const READONLY_WRITE = "Error: [storage:node:sqlite] Error: attempt to write a readonly database";
 
 function stubPlatform(platform: string): () => void {
     const original = Object.getOwnPropertyDescriptor(process, "platform");
@@ -30,9 +34,38 @@ test("hint: win32 + CANTOPEN carries the OS-level suspects", () => {
     try {
         const hint = sqliteOpenFailureHint(CANT_OPEN);
         assert.ok(hint.includes("win32"), "names the platform");
-        assert.ok(hint.includes("antivirus"), "points at AV exclusions");
+        assert.ok(hint.includes("antivirus"), "still points at AV exclusions");
         assert.ok(hint.includes("%USERPROFILE%\\.local\\share\\billion-context\\"), "names the exclusion target");
-        assert.ok(hint.includes("deleting the file will not clear a lock"), "corrects the delete-file advice");
+        assert.ok(hint.includes("Deleting the file will not clear an OS-level refusal"), "corrects the delete-file advice");
+    } finally {
+        restore();
+    }
+});
+
+// #5155: evidence order — the reproducible A/B switch (node runtime's Low
+// integrity label, with the copy-pasteable icacls remedy) must rank BEFORE
+// antivirus in the hint, and both directions of the ordering are pinned.
+test("hint: win32 ranks the node runtime's integrity label before antivirus (#5155)", () => {
+    const restore = stubPlatform("win32");
+    try {
+        for (const err of [CANT_OPEN, READONLY_WRITE]) {
+            const hint = sqliteOpenFailureHint(err);
+            const labelPos = hint.indexOf("integrity label");
+            const avPos = hint.indexOf("antivirus");
+            assert.ok(labelPos !== -1, `names the integrity label (${err})`);
+            assert.ok(avPos !== -1, `still names antivirus (${err})`);
+            assert.ok(labelPos < avPos, `integrity label ranks first (${err})`);
+            assert.ok(hint.includes("/setintegritylevel Medium"), `carries the fix command (${err})`);
+        }
+    } finally {
+        restore();
+    }
+});
+
+test("hint: win32 + READONLY-write (open ok, write refused) fires too (#4614/#5103 shape)", () => {
+    const restore = stubPlatform("win32");
+    try {
+        assert.ok(sqliteOpenFailureHint(READONLY_WRITE).includes("win32"), "fires on the write-refusal shape");
     } finally {
         restore();
     }
