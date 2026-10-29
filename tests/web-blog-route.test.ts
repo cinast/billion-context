@@ -36,6 +36,16 @@ const mkHarnessEl = (): HarnessEl => ({
 
 const FEED = { items: [{ id: "demo", kind: "post", date: "2026-10-08", title: "Demo post", titleZh: "演示", excerpt: "ex", html: "<p>hi</p>", htmlZh: "<p>你好</p>" }] };
 
+// #4957: blog slugs keep whatever the filename carried after the date prefix
+// (blogfeed.ts strips only `YYYY-MM-DD_`), so ids can contain dots, spaces and
+// CJK text — and the list href is percent-encoded, so it also contains `%`.
+const NONASCII_FEED = {
+    items: [
+        { id: "v0.1.208·压缩上线", kind: "post", date: "2026-10-20", title: "Dot and middot id", titleZh: "", excerpt: "ex", html: "<p>dot</p>", htmlZh: "" },
+        { id: "深入浅出上下文压缩", kind: "post", date: "2026-10-21", title: "CJK id", titleZh: "", excerpt: "ex", html: "<p>cjk</p>", htmlZh: "" },
+    ],
+};
+
 async function runClient(hash: string, feed: unknown = FEED): Promise<{ els: Map<string, HarnessEl>; blogHits: number; unhandled: unknown[] }> {
     const unhandled: unknown[] = [];
     const onRej = (r: unknown) => unhandled.push(r);
@@ -113,6 +123,31 @@ test("unknown slug degrades to a back link without a crash", async () => {
     assert.ok(!list.innerHTML.includes("post-body"), "no article body for an unknown slug");
 });
 
+test("blog ids containing non-ASCII or dots route to the article detail, not overview (#4957)", async () => {
+    // The hash is exactly what the index row href produces (encodeURIComponent of
+    // the id): dots survive literal, CJK becomes %XX sequences. The old route
+    // regex only admitted [A-Za-z0-9_-] so both fell back to overview.
+    for (const item of NONASCII_FEED.items) {
+        const hash = "#/blog/" + encodeURIComponent(item.id);
+        const r = await runClient(hash, NONASCII_FEED);
+        assert.equal(r.unhandled.length, 0, `${hash} raised unhandled rejection: ${r.unhandled.join("; ")}`);
+        assert.equal(r.blogHits, 1, `${hash} fetches the feed once`);
+        assert.ok(r.els.get("page-blog") && !r.els.get("page-blog")!.hidden, `${hash} shows the blog section`);
+        assert.ok(r.els.get("page-overview")!.hidden, `${hash} must NOT fall back to the overview page`);
+        const list = r.els.get("bl-list")!;
+        assert.ok(list.innerHTML.includes("post-body"), `${hash} renders the article body`);
+    }
+});
+
+test("unknown non-ASCII blog slug degrades to the back-link card without a crash", async () => {
+    const hash = "#/blog/" + encodeURIComponent("不存在的文章.md");
+    const r = await runClient(hash, NONASCII_FEED);
+    assert.equal(r.unhandled.length, 0, `client raised unhandled rejection: ${r.unhandled.join("; ")}`);
+    const list = r.els.get("bl-list")!;
+    assert.ok(list.innerHTML.includes('<a href="#/blog" class="bl-back">'), "back link present for an unknown non-ASCII slug");
+    assert.ok(!list.innerHTML.includes("post-body"), "no article body for an unknown slug");
+});
+
 test("default and other hashes do NOT activate the blog view or hit the blog endpoint", async () => {
     for (const hash of ["#/overview", "#/logs"]) {
         const r = await runClient(hash);
@@ -120,48 +155,4 @@ test("default and other hashes do NOT activate the blog view or hit the blog end
         assert.equal(r.blogHits, 0, `${hash} must not fetch the blog feed`);
         assert.ok(r.els.get("page-blog")!.hidden, `${hash} keeps the blog section hidden`);
     }
-});
-
-// #4957: ids keep arbitrary filename characters (blogfeed.ts slug — Chinese,
-// dots, ...), and the list links them via encodeURIComponent. The route() regex
-// must accept what the index emits, or every such click falls through to
-// overview and the detail page is permanently unreachable.
-const WEIRD_IDS = ["\u6f14\u793a\u6587\u7ae0", "v1.2-notes", "v1.2\u00b7\u538b\u7f29\u4e0a\u7ebf"];
-const FEED_WEIRD = { items: WEIRD_IDS.map((id, i) => ({
-    id,
-    kind: "post",
-    date: "2026-10-08",
-    title: "Title " + id,
-    titleZh: "",
-    excerpt: "",
-    html: "<p>body-" + i + "</p>",
-    htmlZh: "",
-})) };
-
-test("#/blog/<slug> accepts the encoded hrefs the index emits for non-ASCII and dotted ids (#4957)", async () => {
-    const idx = await runClient("#/blog", FEED_WEIRD);
-    assert.equal(idx.unhandled.length, 0, "index raised unhandled rejection");
-    const list = idx.els.get("bl-list")!;
-    for (const id of WEIRD_IDS) {
-        assert.ok(list.innerHTML.includes('href="#/blog/' + encodeURIComponent(id) + '"'), `index links ${id} via its encoded href`);
-    }
-    for (let i = 0; i < WEIRD_IDS.length; i++) {
-        // the exact hash a card click puts into location.hash
-        const r = await runClient("#/blog/" + encodeURIComponent(WEIRD_IDS[i]), FEED_WEIRD);
-        assert.equal(r.unhandled.length, 0, `${WEIRD_IDS[i]}: raised unhandled rejection`);
-        assert.ok(r.els.get("page-blog") && !r.els.get("page-blog")!.hidden, `${WEIRD_IDS[i]}: blog section shown (no overview fallback)`);
-        assert.ok(r.els.get("page-overview")!.hidden, `${WEIRD_IDS[i]}: overview hidden`);
-        const bl = r.els.get("bl-list")!;
-        assert.ok(bl.innerHTML.includes("body-" + i), `${WEIRD_IDS[i]}: the matching article body rendered`);
-        assert.ok(bl.innerHTML.includes('<a href="#/blog" class="bl-back">'), `${WEIRD_IDS[i]}: back link present`);
-    }
-});
-
-test("unknown encoded non-ASCII blog id degrades to the back-link card without a crash (#4957)", async () => {
-    const hash = "#/blog/" + encodeURIComponent("\u4e0d\u5b58\u5728\u7684\u6587\u7ae0");
-    const r = await runClient(hash, FEED_WEIRD);
-    assert.equal(r.unhandled.length, 0, `${hash} raised unhandled rejection`);
-    const list = r.els.get("bl-list")!;
-    assert.ok(list.innerHTML.includes('<a href="#/blog" class="bl-back">'), "back link present for an unknown encoded id");
-    assert.ok(!list.innerHTML.includes("post-body"), "no article body for an unknown id");
 });
