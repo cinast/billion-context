@@ -26,12 +26,13 @@ import {
 const noop = () => {};
 
 // The guard is plugin-lane only: fakes carry a plugin binding by default so
-// the state-machine rows below exercise the guarded path; pass undefined for
-// proxy-mode (unbound) sessions.
-function mkSession(pluginAgent: string | undefined = "dsh"): Session {
+// the state-machine rows below exercise the guarded path; pass null for
+// proxy-mode (unbound) sessions — a default argument kicks in on undefined,
+// so null is the only sentinel that survives the signature.
+function mkSession(pluginAgent: string | null = "dsh"): Session {
     return {
         id: "s1",
-        metadata: pluginAgent === undefined ? {} : { pluginAgent },
+        metadata: pluginAgent === null ? {} : { pluginAgent },
         state: { nextBlockId: 1 },
         lastCompress: undefined,
     } as unknown as Session;
@@ -171,7 +172,7 @@ test("unit: the guard never touches persisted session state (storage goldens sta
 });
 
 test("unit: proxy-mode sessions (no plugin binding) are out of scope and never arm", () => {
-    const s = mkSession(undefined);
+    const s = mkSession(null);
     recordNetProgressBaseline(s, 600_000, 120_000);
     assert.equal(netProgressState(s), undefined, "proxy sessions get no evidence window");
     // A mature proxy session's raw resend structurally never drops below the
