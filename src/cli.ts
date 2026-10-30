@@ -26,11 +26,11 @@
  */
 import { loadOptions, ensureConfigTemplate } from "./config.js";
 import { startServer, restartForceCloseOf } from "./server.js";
+import { serveStartupFailurePage } from "./startup-failure-page.js";
 import { ensureSqliteEngine } from "./storage/engine-bootstrap.js";
 import { recordEngineBootstrap } from "./storage/runtime-status.js";
 import { configFile as defaultConfigFile } from "./paths.js";
 import { log as loggerLog } from "./logger.js";
-import { runIntegritySelfCheck } from "./integrity-selfcheck.js";
 import { createAutoRestartHandler } from "./restart.js";
 import { checkForUpdate, startAutoUpdate } from "./update.js";
 import { registerUpdateActions } from "./server/update-actions.js";
@@ -715,9 +715,6 @@ export async function main(): Promise<void> {
     // than a bare error. No-op if it already exists.
     ensureConfigTemplate();
     const opts = loadOptions();
-    // #5155: win32-only, non-blocking probe of THIS runtime's integrity label
-    // (a demoted node.exe EPERMs every data write pre-listen); fails open.
-    runIntegritySelfCheck();
     // #2833: SQLite engine self-bootstrap — bounded (60s budget, #3338) and fail-safe; only
     // fetches when unified storage is requested AND no builtin/host engine
     // exists, so the common case costs nothing. Must complete before the first
@@ -726,7 +723,16 @@ export async function main(): Promise<void> {
         resolveProxy: (url) => resolveProxy(opts.routes, opts.proxy, url, opts.proxyFallback),
     });
     recordEngineBootstrap(bootstrapOutcome);
-    const server = await startServer(opts);
+    let server: Awaited<ReturnType<typeof startServer>>;
+    try {
+        server = await startServer(opts);
+    } catch (err) {
+        // #5096: a launcher-spawned child that dies pre-listen holds the
+        // port with a failure page instead of leaving the web UI unreachable;
+        // resolves immediately (rethrow, normal exit-1 path) when manual.
+        await serveStartupFailurePage(opts, err);
+        throw err;
+    }
 
     // #3754: config-file edits don't hot-reload — this process holds whatever
     // loadOptions() resolved at startup until restart. Log the effective
