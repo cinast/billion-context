@@ -102,6 +102,16 @@ entries:
     desc_zh: "强制 preflight 摘要从首次尝试起就走流式（SSE）请求。要求流式的上游现在由错误驱动自学习自动处理（非流式摘要的任何 400 都会触发一次性 SSE 探测，#2494），但网关超时（如 Cloudflare HTTP 524）永远无法触发自学习：在此类网关位于 bili 与源站之间时设置此项，或用于省去一次探测往返。"
     site_en: "Force streaming (SSE) summarization from the first attempt — stream-mandating upstreams now self-heal via a one-shot SSE probe on any non-streaming 400 (#2494); kept as the escape hatch for gateways that time out long non-streaming calls (e.g. Cloudflare 524), which the self-learn cannot detect, or to skip the one probe round-trip."
     site_zh: "强制摘要从首次起走流式（SSE）——要求流式的上游现在通过任何非流式 400 上的一次性 SSE 探测自愈（#2494）；保留作为会掐断长非流式调用的网关（如 Cloudflare 524）的逃生通道（自学习无法感知该场景），也可用于省去一次探测往返。"
+  - key: compress.timestamps
+    type: boolean
+    default: "false (unset)"
+    group: compress
+    id: cw.ts4313
+    render: compress-row
+    desc_en: "Render arrival timestamps (#4313): every rendered ref tag carries at=\"YYYY-MM-DD HH:mm\" (UTC, minute precision) and each folded summary ends with the covered span's [folded A → B UTC] range, so a days-old plan stops competing with a minutes-old instruction on equal footing. History that predates the setting renders unmarked (times are frozen at first sight, never guessed). Enabling rewrites every already-rendered tag once — a one-time provider prefix-cache flush."
+    desc_zh: "渲染消息到达时间（#4313）：每个已渲染的 ref 标签带 at=\"YYYY-MM-DD HH:mm\"（UTC、分钟精度），每条折叠摘要末尾带覆盖区间的 [folded A → B UTC] 时间范围，让几天前的旧方案不再与几分钟前的新指令“看起来同时发生”。早于本设置开启的历史不打标（时间在首次看到时冻结，从不倒填猜测）。开启会把已渲染标签一次性重写——即一次性 provider 前缀缓存冲刷。"
+    site_en: "Show when each message arrived and when a folded span covers (#4313) — ref tags carry at=\"YYYY-MM-DD HH:mm\" UTC and summary footers carry the covered range; pre-existing history renders unmarked."
+    site_zh: "显示每条消息何时到达、每个折叠块覆盖哪段时间（#4313）——ref 标签带 at=\"YYYY-MM-DD HH:mm\" UTC，摘要页脚带覆盖范围；开启前的历史不打标。"
   - key: compress.preserveRecentMessages
     type: number
     default: "3"

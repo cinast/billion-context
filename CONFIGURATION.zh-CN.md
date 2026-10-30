@@ -267,7 +267,7 @@
 | `compress.nudgeModelDecided` | boolean | off (unset) | — | 模型自决的压缩时机（#2228）：tier-1 提醒触发时，先通过一次走会话缓存前缀的短 side call 问模型——以当前任务为前提，现在压缩是否划算。严格 JSON 的 "yes" 会注入带程序最终确定范围的明确压缩指令；"no"、格式错误或超时则本轮不注入任何内容。EMERGENCY 档与 tier≥2 蒸馏始终保留原有 advisory。默认关闭，需显式开启。 |
 | `compress.nudgeDecisionMaxTokens` | number | 200 | — | nudgeModelDecided 所用模型决策 side call 的输出预算（token）。必须 > 0。 |
 | `compress.streamSummary` | boolean | false (unset) | — | 强制 preflight 摘要从首次尝试起就走流式（SSE）请求。要求流式的上游现在由错误驱动自学习自动处理（非流式摘要的任何 400 都会触发一次性 SSE 探测，#2494），但网关超时（如 Cloudflare HTTP 524）永远无法触发自学习：在此类网关位于 bili 与源站之间时设置此项，或用于省去一次探测往返。 |
-| `compress.timestamps` | boolean | false（不设） | — | 渲染消息到达时间戳（#4313）：每个已渲染的 ref 标签带 `at="YYYY-MM-DD HH:mm"`（UTC、分钟精度），每条折叠摘要末尾带覆盖区间的 `[folded A → B UTC]` 时间范围。开启时一次性前缀缓存冲刷；开启之前的历史不打标。 |
+| `compress.timestamps` | boolean | false (unset) | — | 渲染消息到达时间（#4313）：每个已渲染的 ref 标签带 at="YYYY-MM-DD HH:mm"（UTC、分钟精度），每条折叠摘要末尾带覆盖区间的 [folded A → B UTC] 时间范围，让几天前的旧方案不再与几分钟前的新指令“看起来同时发生”。早于本设置开启的历史不打标（时间在首次看到时冻结，从不倒填猜测）。开启会把已渲染标签一次性重写——即一次性 provider 前缀缓存冲刷。 |
 | `compress.preserveRecentMessages` | number | 3 | — | 最近的消息软保护、免于折叠。 |
 | `compress.preserveRecentTokens` | number | kernel ≈5000 | — | 最近的 token 软保护、免于折叠。 |
 | `compress.minCompressRangeChars` | number (deprecated alias: minCompressRange) | kernel ≈5000 | — | 可折叠片段的最小字符数；更短的永不折叠。 |
