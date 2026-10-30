@@ -359,12 +359,11 @@ const DRIFT_TAIL = new RegExp(
 );
 
 
-/** #5175/#5175 whole-text drift strip. Removes matched pairs, then the orphan
- *  halves of the names they proved — a lone `</acct>` is indistinguishable from
- *  prose on its own, so the pair is what licenses its removal. `attested` is
- *  the caller's evidence that an echo exists in this content (#1760 keeps a
- *  bare close-only shape when nothing attests it). */
-function stripDriftPairs(text: string, attested: boolean): string {
+/** #5175 whole-text drift strip. Removes matched pairs, then the orphan halves
+ *  of the names they proved — a lone close half is indistinguishable from prose
+ *  on its own, so the pair found in the same text is what licenses its removal
+ *  (#1760 keeps a bare close-only shape when nothing attests it). */
+function stripDriftPairs(text: string): string {
     if (!text.includes("\x3c")) return text;
     // 1) Prove the drift names from GENUINE pairs on the raw text. A drift pair
     //    is the licence for every name-side cleanup below: a bare `</acct>` or a
@@ -741,7 +740,7 @@ function stripPass(text: string, dropToolCallEmission: boolean, requestText: str
     // already claimed everything it recognises; what reaches here is exactly the
     // drift this pass exists for. `attested || out !== text` mirrors
     // DEAD_REF_CLOSE's gate (#1760).
-    out = stripEmptyMismatch(stripEmptyPairs(stripDriftPairs(out, attested || out !== text)));
+    out = stripEmptyMismatch(stripEmptyPairs(stripDriftPairs(out)));
     return stripBiliArtifacts(out);
 }
 
@@ -763,7 +762,7 @@ const STRIP_PASS_CAP = 8;
  *  land in different pushes is left alone rather than guessed at — matching
  *  #1720's documented behaviour, never widening it. */
 export function stripDriftResidue(text: string): string {
-    return stripEmptyMismatch(stripEmptyPairs(stripDriftPairs(text, false)));
+    return stripEmptyMismatch(stripEmptyPairs(stripDriftPairs(text)));
 }
 /** Whole-text ACP artifact strip. Returns a FIXED POINT whenever the exposure
  *  cascade settles within STRIP_PASS_CAP passes (all attested shapes and every
