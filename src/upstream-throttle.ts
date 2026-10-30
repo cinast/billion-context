@@ -118,7 +118,8 @@ export function sendModelDimension(url: string, body?: string | Buffer | null): 
     }
 }
 
-function holdKey(url: string, headers: Record<string, string>, body?: string | Buffer | null): { key: string; host: string; cred: string | undefined; model: string | undefined } {
+/** The origin+credential part of a hold key — cheap, no body involved. */
+function holdBase(url: string, headers: Record<string, string>): { base: string; host: string; cred: string | undefined } {
     let host = url;
     try {
         host = new URL(url).host;
@@ -126,12 +127,32 @@ function holdKey(url: string, headers: Record<string, string>, body?: string | B
     // Multi-account safety (#2131 fingerprint): two credentials on the same
     // origin are independent rate-limit pools and must not hold each other.
     const cred = credentialFingerprint(headers);
-    // #5201: one credential can front many models with independent quota pools
-    // (LiteLLM/one-api style gateways) — narrow the key to the send's model
-    // when identifiable so an exhausted pool cannot hold its siblings.
+    return { base: cred === undefined ? host : `${host}\u0000${cred}`, host, cred };
+}
+
+/** #5201: one credential can front many models with independent quota pools
+ *  (LiteLLM/one-api style gateways) — narrow the key to the send's model when
+ *  identifiable so an exhausted pool cannot hold its siblings. */
+function holdKeyOf(base: string, model: string | undefined): string {
+    return model === undefined ? base : `${base}\u0000${model}`;
+}
+
+function holdKey(url: string, headers: Record<string, string>, body?: string | Buffer | null): { key: string; host: string; cred: string | undefined; model: string | undefined } {
+    const b = holdBase(url, headers);
     const model = sendModelDimension(url, body);
-    const base = cred === undefined ? host : `${host}\u0000${cred}`;
-    return { key: model === undefined ? base : `${base}\u0000${model}`, host, cred, model };
+    return { key: holdKeyOf(b.base, model), host: b.host, cred: b.cred, model };
+}
+
+/** True when some armed hold sits on this send's base or one of its
+ *  model-suffixed children — the only case where the full key could match.
+ *  Lets the gate and resolved-note skip the outbound-body parse while a
+ *  throttle episode rages on a DIFFERENT origin/credential. */
+function anyHoldUnderBase(base: string): boolean {
+    const prefix = `${base}\u0000`;
+    for (const k of holds.keys()) {
+        if (k === base || k.startsWith(prefix)) return true;
+    }
+    return false;
 }
 
 function evictOldest(): void {
@@ -183,11 +204,15 @@ export function upstreamThrottleLocalReject(
 ): ThrottleLocalReject | undefined {
     if (!throttle429Enabled()) return undefined;
     // #5201: no holds armed → nothing to gate. Skip the key work entirely so
-    // the per-request cost stays zero while the governor is idle — the body
-    // parse inside holdKey only runs during/around a throttle episode.
+    // the per-request cost stays zero while the governor is idle — and the
+    // body parse inside sendModelDimension only runs for sends whose
+    // origin+credential base actually has a hold armed, so an episode on one
+    // origin never costs every other origin a per-request JSON.parse of the
+    // full outbound body.
     if (holds.size === 0) return undefined;
-    const { key } = holdKey(url, headers, body);
-    const st = holds.get(key);
+    const b = holdBase(url, headers);
+    if (!anyHoldUnderBase(b.base)) return undefined;
+    const st = holds.get(holdKeyOf(b.base, sendModelDimension(url, body)));
     if (st === undefined) return undefined;
     if (now < st.nextAttemptAt) return makeReject(st, now);
     // Window open: admit exactly one probe at a time; the slot self-releases
@@ -244,13 +269,17 @@ export function noteUpstreamThrottleResolved(
 ): void {
     void now;
     // Same idle fast path as the gate (#5201): nothing armed → nothing to
-    // clear, and this function runs on EVERY successful forward.
+    // clear, and this function runs on EVERY successful forward; the base
+    // precheck keeps the body parse off sends whose origin+credential has no
+    // hold (see upstreamThrottleLocalReject).
     if (!throttle429Enabled() || holds.size === 0) return;
-    const { key, host } = holdKey(url, headers, body);
+    const b = holdBase(url, headers);
+    if (!anyHoldUnderBase(b.base)) return;
+    const key = holdKeyOf(b.base, sendModelDimension(url, body));
     const st = holds.get(key);
     if (st === undefined) return;
     holds.delete(key);
-    const where = st.model !== undefined ? `${host} (model ${st.model})` : host;
+    const where = st.model !== undefined ? `${b.host} (model ${st.model})` : b.host;
     loggerLog("info", `[acp-proxy] [429-hold] ${where}: cleared after HTTP ${status} (was ${st.streak} consecutive 429s) (#4204)`);
 }
 

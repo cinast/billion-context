@@ -147,3 +147,15 @@ test("#5201: sendModelDimension — body beats path, garbage/non-string model ig
     assert.equal(sendModelDimension("http://h.invalid/v1beta/models/gemini-z:generateContent", Buffer.from('{"model":"body-wins"}')), "body-wins", "body field wins over path");
     assert.equal(sendModelDimension("http://h.invalid/v1/messages", null), undefined, "plain /v1/messages carries no model");
 });
+
+test("#5201: a hold on one origin never gates a different origin (same credential included)", () => {
+    withKnobs({ BILI_THROTTLE_429: "1", BILI_THROTTLE_429_MAX_CONSECUTIVE: "3", BILI_THROTTLE_429_BASE_DELAY_MS: "1000", BILI_THROTTLE_429_MAX_DELAY_MS: "8000" }, () => {
+        _resetUpstreamThrottleForTest();
+        const URL_B = "http://other.example/v1/chat/completions";
+        for (let i = 0; i < 3; i++) noteUpstreamThrottle429(URL_A, H_CRED, null, T0 + i * 1000, bodyFor("minimax-flash"));
+        const st = activeThrottleHolds()[0];
+        assert.ok(upstreamThrottleLocalReject(URL_A, H_CRED, st.nextAttemptAt - 1, bodyFor("minimax-flash")), "held origin still held");
+        assert.equal(upstreamThrottleLocalReject(URL_B, H_CRED, st.nextAttemptAt - 1, bodyFor("minimax-flash")), undefined, "sibling origin unaffected even with the same credential");
+        assert.equal(activeThrottleHolds().length, 1, "no spurious hold on the sibling origin");
+    });
+});
