@@ -546,7 +546,7 @@ export async function* runCompressLoop(
             undefined,
             signal,
             (info) => {
-                if (info.status === 429) noteUpstreamThrottle429(requestOptions.url, requestOptions.headers, null); // retry-after isn't carried in ReplayRetryInfo; the settled response below re-notes with the header
+                if (info.status === 429) noteUpstreamThrottle429(requestOptions.url, requestOptions.headers, null, Date.now(), wireBodyStr); // retry-after isn't carried in ReplayRetryInfo; the settled response below re-notes with the header
                 // #189: correlate the rejection with the rewrite that
                 // preceded it (shrink ratio + fold point), if any.
                 const lc = lastCompressSuffix(ctx.session.lastCompress);
@@ -561,11 +561,11 @@ export async function* runCompressLoop(
         // (retry-after is not carried on the error) before rethrowing.
         try {
             const upstreamSend = await throttledSend;
-            noteUpstreamThrottleResolved(requestOptions.url, requestOptions.headers, upstreamSend.response.status);
+            noteUpstreamThrottleResolved(requestOptions.url, requestOptions.headers, upstreamSend.response.status, Date.now(), wireBodyStr);
             return upstreamSend;
         } catch (error) {
             if (error instanceof UpstreamHttpError && error.status === 429) {
-                noteUpstreamThrottle429(requestOptions.url, requestOptions.headers, null);
+                noteUpstreamThrottle429(requestOptions.url, requestOptions.headers, null, Date.now(), wireBodyStr);
             }
             throw error;
         }
