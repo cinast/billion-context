@@ -15,7 +15,7 @@
  * kernel, because it is Windows/billion-context specific.
  */
 import { log as loggerLog } from "./logger.js";
-import { integrityLabelDiagnosis } from "./integrity-label.ts";
+import { integrityLabelDiagnosis } from "./integrity-label.js";
 
 const LOCK_CODES = /\b(EPERM|EBUSY|EACCES)\b/;
 

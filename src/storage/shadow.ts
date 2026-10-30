@@ -22,7 +22,7 @@
  */
 
 import { log as loggerLog } from "../logger.js";
-import { integrityLabelDiagnosis } from "../integrity-label.ts";
+import { integrityLabelDiagnosis } from "../integrity-label.js";
 import { planIngest, planIngestDelta, loadLegacyView, completeBlockContents, type LegacySessionLike } from "./ingest.ts";
 import type { BlockView } from "../session.js";
 import { resolveStorageMode, resolveStorageWalJournalSizeLimit, type StorageMode } from "../knobs.ts";
