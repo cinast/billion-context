@@ -183,7 +183,7 @@ function makeReject(st: HoldState, now: number): ThrottleLocalReject {
     return {
         status: 429,
         code: "bili_throttle_hold",
-        message: `upstream rate-limited ${st.streak} consecutive request(s) to ${st.host}; bili is holding outbound sends until ${new Date(st.nextAttemptAt).toISOString()} (~${secsLeft}s, exponential backoff) instead of amplifying — zero egress while held, auto-resumes when the limit clears (#4204)`,
+        message: `upstream rate-limited ${st.streak} consecutive request(s) to ${where}; bili is holding outbound sends until ${new Date(st.nextAttemptAt).toISOString()} (~${secsLeft}s, exponential backoff) instead of amplifying — zero egress while held, auto-resumes when the limit clears (#4204)`,
         retryAfterSec: secsLeft,
         streak: st.streak,
         maxConsecutive: maxC,
