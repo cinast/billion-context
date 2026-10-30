@@ -88,6 +88,20 @@ async function harness(): Promise<{
 
 const core = (id: string, text: string): Record<string, unknown> => ({ id, role: "user", contentType: "text", content: text.repeat(200) });
 
+// #5228: the wrap-up chain resolves BEFORE the floating pointer recording
+// (#5155 floats afterNextFlush→recordCanonicalPointers behind the ack), so a
+// fixed sleep here races under parallel load — poll the durable condition
+// instead (the same ext read the cold rebuild performs).
+async function waitPtrs(expected: number): Promise<void> {
+    const deadline = Date.now() + 5000;
+    for (;;) {
+        const v = getStore().getSessionExt("conv-ptrs", "inc:canonical-ptrs");
+        if (Array.isArray(v) && v.length >= expected) return;
+        if (Date.now() > deadline) throw new Error(`canonical pointers stalled at ${JSON.stringify(v)} (expected >= ${expected})`);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+}
+
 test("cold canonical rebuild: identical resync keeps the shared prefix; delta assembles the FULL history", async () => {
     const h = await harness();
     try {
@@ -102,10 +116,7 @@ test("cold canonical rebuild: identical resync keeps the shared prefix; delta as
         assert.equal(resync.status, 200);
         assert.equal(resync.appliedSeq, 3);
         await __incrementalPtrChainForTests("conv-ptrs");
-        // #5155: the wrap-up defers the durable flush (debounced) — let the
-        // rows settle before dropping the resident caches, or the cold
-        // rebuild reads a one-turn-stale table and honestly 409s.
-        await new Promise((resolve) => setTimeout(resolve, 20));
+        await waitPtrs(3);
         __resetIncrementalLaneForTests();
 
         const delta = await h.turn({ sinceSeq: 3, messages: [core("u4", "four")] });
@@ -134,8 +145,7 @@ test("cold canonical rebuild: edited-tail resync keeps the shared prefix, drops 
         // one-turn-stale pointers.
         await h.turn({ sinceSeq: 0, resync: true, messages: [core("u1", "one"), core("u2", "two-EDITED")] });
         await __incrementalPtrChainForTests("conv-ptrs");
-        // #5155: settle the debounced flush before the cold reset (see above).
-        await new Promise((resolve) => setTimeout(resolve, 20));
+        await waitPtrs(2);
         __resetIncrementalLaneForTests();
         const delta = await h.turn({ sinceSeq: 2, messages: [core("u3", "three")] });
         assert.equal(delta.status, 200);
