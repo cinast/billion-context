@@ -7830,7 +7830,7 @@ test("default attach diagnostics go to the log file, never the terminal (#3200)"
         assert.equal(dbg, undefined);
         assert.equal(stderrWrites.length, 1, `debug stderr was: ${JSON.stringify(stderrWrites)}`);
         assert.ok(stderrWrites[0]!.includes("code-fingerprint-mismatch"), stderrWrites[0]);
-        assert.ok(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z \[info\] \[v=\d+\.\d+\.\d+\] native-attach: skip /.test(stderrWrites[0]!), `head format: ${stderrWrites[0]}`);
+        assert.ok(/^\d{4}-\d{2}-\d{2}T[\d:.]+ \[info\] \[v=\d+\.\d+\.\d+\] native-attach: skip /.test(stderrWrites[0]!), `head format: ${stderrWrites[0]}`);
         const content2 = fs.readFileSync(logFile, "utf8");
         assert.equal(content2.split("code-fingerprint-mismatch").length - 1, 2, "one file line per run");
     } finally {
@@ -8028,7 +8028,7 @@ test("explicit debug keeps one controlled stderr copy of the attach banner (#340
         assert.equal(handle.attached, true);
         assert.equal(stderrWrites.length, 1, `debug stderr was: ${JSON.stringify(stderrWrites)}`);
         assert.ok(stderrWrites[0]!.includes("bili: attaching to running proxy at http://127.0.0.1:8787"), stderrWrites[0]);
-        assert.ok(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z \[info\] \[v=\d+\.\d+\.\d+\] /.test(stderrWrites[0]!), `head format: ${stderrWrites[0]}`);
+        assert.ok(/^\d{4}-\d{2}-\d{2}T[\d:.]+ \[info\] \[v=\d+\.\d+\.\d+\] /.test(stderrWrites[0]!), `head format: ${stderrWrites[0]}`);
     });
 });
 
@@ -8188,7 +8188,7 @@ test("ensureProxyRunning: a squatter without a matching child record ends in a l
 // first read sees nothing, so the #1753 squatter branch provably fires before
 // the handshake settles (gating on read count taken AT SPAWN, immune to
 // however many times pre-spawn discovery reads the file).
-const SQUATTER_MSG = "bili: port 18787 answers health (pid 875250) but is not the proxy this launcher spawned (child pid 42451) — waiting for the spawned instance to report its real origin";
+const SQUATTER_MSG = "bili: port 18787 answers health (pid 875250) but is not the proxy this launcher spawned (child pid 42451) — waiting for the spawned instance to report its real origin; if that never happens, kill pid 875250 or set native.attachExternal=true / BILI_NATIVE_ATTACH_EXTERNAL=1 to attach to the holder instead";
 function makeSquatterScenario(debug: boolean, attachDiag?: (msg: string) => void) {
     let childToken = "";
     let preSpawnReads = -1;
@@ -8305,7 +8305,7 @@ test("ensureProxyRunning explicit debug: squatter diagnostic keeps one controlle
             const scenario = makeSquatterScenario(true);
             const handle = await ensureProxyRunning(scenario.opts, scenario.deps);
             assert.equal(handle.origin, "http://127.0.0.1:18790");
-            const expected = new RegExp(`^\\d{4}-\\d{2}-\\d{2}T[0-9:.]+Z \\[info\\] \\[v=[^\\]]+\\] ${SQUATTER_MSG.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);
+            const expected = new RegExp(`^\\d{4}-\\d{2}-\\d{2}T[0-9:.]+ \\[info\\] \\[v=[^\\]]+\\] ${SQUATTER_MSG.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);
             const hits = writes.filter((w) => w.includes("but is not the proxy this launcher spawned"));
             assert.equal(hits.length, 1, `expected exactly one terminal line, got: ${JSON.stringify(writes)}`);
             assert.ok(expected.test(hits[0].trimEnd()), `stderr line format drifted: ${JSON.stringify(hits[0])}`);

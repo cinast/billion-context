@@ -13,7 +13,7 @@ on:
     # lane or a bugfix-release/** carve-out get the CORE matrix directly;
     # backport.yml's token pushes compensate by dispatching this workflow
     # on the carry/lane ref.
-    branches: [master, "*_release-v*", "bugfix-release/**", "bugfix-v*"]
+    branches: [master, "*_release-v*", "bugfix-release/**", "bugfix-v*", bugfix]
   pull_request:
     # agent-relay: #3468 agent PRs target the relay branch.
     # bugfix-v*: carry PRs INTO the current patch lane (backport/carry-N)
@@ -21,7 +21,10 @@ on:
     # release-bugfix.yml's dispatch, not this trigger.
     # bugfix-release/**: legacy one-off carve-out branches keep their old
     # behaviour.
-    branches: [master, agent-relay, "bugfix-v*", "bugfix-release/**"]
+    # bugfix: THE GATE branch (v3 release model). Ship PRs (tag lane ->
+    # bugfix) must run the FULL matrix BEFORE the merge can happen — the
+    # scope step below forces full for base=bugfix regardless of labels.
+    branches: [master, agent-relay, "bugfix-v*", "bugfix-release/**", bugfix]
     # three-layer CI (#3295): synchronize keeps the CORE matrix blocking on
     # every push; `labeled` lets the `ci:full` label widen a PR to the FULL
     # matrix without a re-push (other labels no-op in the plan job).
@@ -95,6 +98,7 @@ jobs:
   # names (branch protection keys off `test (os, node, shard)`).
   plan:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       actions: read
@@ -119,6 +123,7 @@ jobs:
           # pull_request case below.
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           HEAD_SHA: ${{ github.sha }}
           FULL_INPUT: ${{ inputs.full }}
@@ -192,8 +197,14 @@ jobs:
                 # lane ship PRs are deliberately NOT glob-matched: their own
                 # workflow gates the full suite at the PR head tree already
                 # (lane ship PRs ride the bot-author rule above).
+                # v3 gate-branch model: a ship PR INTO `bugfix` is born
+                # full-scope — that merge IS the publish decision, so the FULL
+                # matrix must exist at the PR head before the human merges
+                # (same label/merge race lesson as #3688); no ci:full label
+                # needed on the ship PR itself.
                 [ "${PR_AUTHOR:-}" = "github-actions" ] \
                 || [ "${PR_AUTHOR:-}" = "app/github-actions" ] \
+                || [ "${PR_BASE_REF:-}" = "bugfix" ] \
                 || case "${PR_HEAD_REF:-}" in *_release-v*) true ;; *) false ;; esac \
                 || case "${PR_TITLE:-}" in "[PR] release"*|"release v"[0-9]*) true ;; *) false ;; esac
               then
@@ -255,6 +266,7 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.testMatrix) }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -311,6 +323,7 @@ jobs:
     needs: [plan]
     if: ${{ !failure() && !cancelled() && needs.plan.outputs.scope != 'skip' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
       mysql:
         image: mysql:8.0
@@ -336,7 +349,13 @@ jobs:
       # resolves it to the built dist. Same prerequisite as the main test
       # matrix (run-ci-tests pretest parity) and ci-e2e-dsh.yml.
       - run: npm --prefix kernel run build
-      - run: node --import tsx --test tests/storage-backend-contract.test.ts tests/storage-backend-knob.test.ts
+      # --test-concurrency=1: every mysql lane in these files shares ONE DSN
+      # and database; node's default file parallelism (cores-1) would let two
+      # suites race on the same tables once runners grow past 2 vCPUs.
+      # storage-backend-mysql-e2e.test.ts is deliberately NOT listed: its hot-
+      # path test fails deterministically on real MySQL (pre-existing defect,
+      # not caused by any PR in flight) — tracked in #4926; re-add it there.
+      - run: node --import tsx --test --test-concurrency=1 tests/storage-backend-contract.test.ts tests/storage-backend-knob.test.ts tests/issue4666-migration-dedup.test.ts
         env:
           BILI_MYSQL_TEST_DSN: mysql://root:bili-test-root@127.0.0.1:3306/bili
 
@@ -352,6 +371,7 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.staticMatrix) }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -375,6 +395,7 @@ jobs:
 
   version-guard:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
@@ -385,7 +406,11 @@ jobs:
           set -euo pipefail
           BRANCH="${GITHUB_HEAD_REF}"
           # Release + bugfix carve-out branches (#2851/#2853) may bump version — one isolated 'release v{VERSION}' commit each.
-          if [[ "$BRANCH" == *_release-v* || "$BRANCH" == bugfix-release/* || "$BRANCH" == bugfix-v* ]]; then
+          # v3 gate-branch model (#4660): tag lanes keep their ONE legal pre-bump commit (made at cut time); the
+          # auto-opened alignment PR (head=bugfix) carries that bump into master, and backport carry branches
+          # (backport/carry-N) inherit it from their lane base — all three head shapes must pass this guard or the
+          # cycle deadlocks at P3 (alignment never merges → next lane never auto-cuts).
+          if [[ "$BRANCH" == *_release-v* || "$BRANCH" == bugfix-release/* || "$BRANCH" == bugfix-v* || "$BRANCH" == bugfix || "$BRANCH" == backport/carry-* ]]; then
             echo "✓ release branch ($BRANCH) — version changes allowed"
             exit 0
           fi
@@ -399,6 +424,7 @@ jobs:
 
   kernel-guard:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
@@ -416,9 +442,16 @@ jobs:
             exit 0
           fi
           # Rule 1: any PR touching kernel/** must declare 'kernel-change:' in its body.
-          if git diff --name-only origin/master...HEAD -- kernel/ | grep -q .; then
+          # #4828: kernel/package-lock.json is GENERATED state, not kernel source —
+          # agents' test-prep installs churn it without any intent to change the
+          # kernel (8 PRs tripped this gate on lockfile-only diffs). The human gate
+          # protects kernel SOURCE; lockfile consistency is already enforced by the
+          # separate lock-sync job (which FAILS on real drift). Exempt the lockfile
+          # here so pure churn passes without an owner round-trip.
+          KERNEL_TOUCHED="$(git diff --name-only origin/master...HEAD -- kernel/ | grep -v '^kernel/package-lock\.json$' || true)"
+          if [[ -n "$KERNEL_TOUCHED" ]]; then
             if ! printf '%s' "$PR_BODY" | grep -q 'kernel-change:'; then
-              echo "::error::This PR modifies kernel/ but does not declare 'kernel-change: <reason>' in its body."
+              echo "::error::This PR modifies kernel/ ($KERNEL_TOUCHED) but does not declare 'kernel-change: <reason>' in its body."
               echo "Kernel changes are human-gated: owner approval plus explicit declaration required. See AGENTS.md 'Kernel Boundary'."
               exit 1
             fi
@@ -452,6 +485,7 @@ jobs:
   # load-bearing core compression).
   pi-subagents-guard:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
@@ -485,6 +519,7 @@ jobs:
   # generator goes red here. Zero-dep script: no npm install needed.
   docs-sync:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -499,6 +534,7 @@ jobs:
   # added to src goes red here with the missing names listed.
   docs-coverage:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -513,6 +549,7 @@ jobs:
   # Not gated to pull_request so master pushes are held to the same surface.
   config-surface-guard:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -527,6 +564,7 @@ jobs:
   # node, no install step. Not gated to pull_request, same as the guards above.
   lifecycle-ledger-guard:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -542,6 +580,7 @@ jobs:
   # mechanical: lane logic moves ⇔ a side-lane suite moves with it.
   lane-guard:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
@@ -584,6 +623,7 @@ jobs:
   # plain node, no install step.
   unused-exports:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -600,6 +640,7 @@ jobs:
   # Zero-dep: plain node, no install step.
   test-import-graph:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -618,6 +659,7 @@ jobs:
   # AGENTS.md §4 rule 2 ("release commit changes ONLY version + lock if drifts").
   lock-sync:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -644,6 +686,7 @@ jobs:
     needs: [test, static-gates]
     if: ${{ !cancelled() && github.event_name == 'schedule' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       issues: write
       contents: read
