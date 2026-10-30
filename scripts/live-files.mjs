@@ -96,6 +96,9 @@ export const LIVE_FILES = [
     // state lives under a per-run tmpdir, and each test uses its own receiver +
     // origin, so the refcounted-worker table never sees cross-test collisions.
     "tests/issue5152-owner-beat-survives-host-stall.test.ts",
+    // #4612: spawns an idle node child as the "other live process" fixture;
+    // binds no ports, mkdtemp-isolated per test
+    "tests/issue4612-gc-online-guard.test.ts",
     // #4566 part 2: settleZonePort/ensureProxyRunning rows drive a fully
     // simulated world (mocked SpawnFn, temp zone file, squatted-port set);
     // the only real spawn is spawnSync(node -e "") for a pid probe, so no
