@@ -12,8 +12,6 @@ import {
     stripAcpTags,
 } from "../src/loop/tag-echo-filter.ts";
 import { endsWithDraftClose, isDraftDump } from "../src/degenerate-turn.ts";
-import { pipePluginResponsesWithStrip } from "../src/plugin.ts";
-import type { Session } from "../src/session.ts";
 
 // #5175 defect A: the open-side name enum only ever allowed MID-name mutation
 // (`acpi`), never a tail append, so every drifted name (`acpt`/`apct`/`acct`/
@@ -93,8 +91,6 @@ test("#5175 A: the signed-thinking channel is never rewritten by the drift rule"
     assert.equal(stripAcpTags(echo), "", "visible text channel is filtered");
     // The verbatim channel's rule is identity, so an echo riding there is
     // expected to survive — that is the invariant, not a leak.
-    const identity = (x: string): string => x;
-    assert.equal(identity(echo), echo);
 });
 
 test("#5175 A: the kernel's OWN protocol tags are never read as drift", () => {
@@ -143,64 +139,6 @@ test("#5175 B: ordinary prose is never a draft dump", () => {
         assert.equal(isDraftDump(s), false, `false positive on ${JSON.stringify(s)}`);
     }
 });
-
-// #5175 end-to-end: the REAL responses-lane pipe, not just the pure filter.
-// This is the path the reported turn travelled — a `response.output_text.delta`
-// family stream where the model wrote the drifted render tag as prose.
-function makeResLocal(chunks: string[]) {
-    return {
-        writes: chunks,
-        write(b: Buffer | string) {
-            chunks.push(typeof b === "string" ? b : b.toString("utf8"));
-            return true;
-        },
-        end(b?: Buffer | string) {
-            if (b !== undefined) chunks.push(typeof b === "string" ? b : b.toString("utf8"));
-        },
-        once() {},
-        destroyed: false,
-        writableEnded: false,
-        writeHead() {},
-        setHeader() {},
-        getHeader() { return undefined; },
-        removeHeader() {},
-        headersSent: false,
-    };
-}
-
-function makeSessionLocal(): Session {
-    return {
-        id: "testsess5175",
-        protocol: "responses",
-        upstreamOrigin: "http://127.0.0.1:9/v1",
-        label: "test",
-        createdAt: 0,
-        lastUsedAt: 0,
-        requests: 0,
-        lastInputTokens: 0,
-        stats: {},
-        dirty: false,
-    } as unknown as Session;
-}
-
-function sseLocal(ev: Record<string, unknown>): string {
-    return `event: ${String(ev.type)}\ndata: ${JSON.stringify(ev)}\n\n`;
-}
-
-function streamOfLocal(events: string[]): ReadableStream<Uint8Array> {
-    const enc = new TextEncoder();
-    let i = 0;
-    return new ReadableStream<Uint8Array>({
-        pull(controller) {
-            if (i < events.length) {
-                controller.enqueue(enc.encode(events[i]));
-                i += 1;
-            } else {
-                controller.close();
-            }
-        },
-    });
-}
 
 
 // #5175 defect A, streaming lane: the state machine's matchers are all
@@ -289,7 +227,7 @@ for (const [name, text] of PARITY_SHAPES) {
     });
 }
 
-// ---------- #5176 follow-up: the retry CANNOT retract what already left ----------
+// ---------- #5179 follow-up: the retry CANNOT retract what already left ----------
 
 // #4764 and this case are the same residual: the #2303 retry fires at stream
 // END, but every delta was already appended to the client's reply as it was
@@ -300,8 +238,8 @@ for (const [name, text] of PARITY_SHAPES) {
 //
 // This is pinned as a CHARACTERIZATION test, not an aspiration: it documents
 // why "just strip the draft from the stream" is not a one-line fix, and why
-// the real fix has to HOLD the draft span before releasing it (#5176).
-test("#5176 the #2303 retry documents its own limit: already-streamed draft bytes are not retracted", async () => {
+// the real fix has to HOLD the draft span before releasing it (#5179).
+test("#5179 the #2303 retry documents its own limit: already-streamed draft bytes are not retracted", async () => {
     const { pipePluginChatWithStrip } = await import("../src/plugin.ts");
     const enc = new TextEncoder();
     const chunk = (delta: Record<string, unknown>): string =>
