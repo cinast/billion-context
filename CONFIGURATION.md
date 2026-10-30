@@ -267,6 +267,7 @@ This index is generated from `website/config-reference/*.yaml` — edit the seed
 | `compress.nudgeModelDecided` | boolean | off (unset) | — | Model-decided nudge timing (#2228): an armed tier-1 nudge first asks the model — via a short side call over the session's cached prefix — whether compressing NOW helps the current task. A strict-JSON "yes" injects an explicit directive with a program-finalized span; "no", a malformed answer, or a timeout injects nothing this round. EMERGENCY arms and tier≥2 distillation always keep the legacy advisory. Off unless explicitly enabled. |
 | `compress.nudgeDecisionMaxTokens` | number | 200 | — | Output budget (tokens) of the model-decision side call used by nudgeModelDecided. Must be > 0. |
 | `compress.streamSummary` | boolean | false (unset) | — | Force preflight summarization to run as a streaming (SSE) call from the first attempt. The error-driven self-learn handles stream-mandating upstreams on its own (any 400 on a non-streaming summary triggers a one-shot SSE probe, #2494) but NEVER arms on gateway timeouts (e.g. Cloudflare HTTP 524): set this where such a gateway sits between bili and the origin, or simply to skip the one probe round-trip. |
+| `compress.timestamps` | boolean | false (unset) | — | Render arrival timestamps (#4313): every rendered ref tag carries `at="YYYY-MM-DD HH:mm"` (UTC, minute precision) and each folded summary ends with the covered span's `[folded A → B UTC]` range. One-time prefix-cache flush when toggled on; history that predates the setting renders unmarked. |
 | `compress.preserveRecentMessages` | number | 3 | — | The most recent messages stay soft-protected from folds. |
 | `compress.preserveRecentTokens` | number | kernel ≈5000 | — | The most recent tokens stay soft-protected from folds. |
 | `compress.minCompressRangeChars` | number (deprecated alias: minCompressRange) | kernel ≈5000 | — | Smallest foldable range, in characters; shorter ranges never fold. |
@@ -1389,6 +1390,14 @@ For each request, the proxy resolves the settings by longest-URL-prefix match (t
 - **Default:** `200`
 - **Status:** ACTIVE (#2228)
 - **Description:** Output budget, in tokens, of the model-decision side call made when `nudgeModelDecided` is enabled. Must be > 0 (invalid values are rejected at config load).
+
+#### `timestamps`
+
+- **Type:** `boolean`
+- **Default:** `false` (unset)
+- **Status:** ACTIVE (#4313)
+- **Description:** Render arrival timestamps. When on, every rendered message ref tag carries the message's arrival time — `at="YYYY-MM-DD HH:mm"` (UTC, minute precision, frozen at first sight) — and each rendered summary carrier ends with the covered span's arrival-time range, `[folded 2026-10-22 06:14 → 2026-10-22 18:03 UTC]` (single point when the range collapses to one minute). The freeze is unconditional even while rendering is off, so enabling mid-session yields real arrival times for everything seen since deployment. History that predates the feature has no frozen time and renders UNMARKED — never guessed at. Maps to the kernel field `renderTimestamps` (acp-kernel ≥ 0.0.171).
+- **Caveats:** enabling rewrites every already-rendered tag once — a one-time provider prefix-cache flush on the next turn. Keep it off for cache-critical long sessions unless the temporal signal matters. Available as a Web UI quick toggle.
 
 #### `preserveRecentMessages`
 

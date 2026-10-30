@@ -68,6 +68,13 @@ export function syncBlocks(
     },
     // Snapshot is keyed by ref with primitive values — shallow copy suffices.
     tokenSnapshot: { ...(state.tokenSnapshot ?? {}) },
+    // #4313: arrival times ride the same clone, ABSENCE-PRESERVING — a
+    // pre-#4313 state must clone to an identical digest. Retention differs
+    // from tokenSnapshot BELOW — footers read times of FOLDED messages, so
+    // the live-only prune would kill them at the fold boundary.
+    ...(state.timeSnapshot
+      ? { timeSnapshot: { ...state.timeSnapshot } }
+      : {}),
     nudge: { ...state.nudge, anchors: { ...state.nudge.anchors } },
     stats: { ...state.stats },
     absorbed: (state.absorbed ?? []).map((record) => ({ ...record })),
@@ -124,6 +131,26 @@ export function syncBlocks(
       if (liveRefs.has(ref)) pruned[ref] = n;
     }
     result.tokenSnapshot = pruned;
+  }
+
+  // #4313: time retention is WIDER than the token prune — a folded message's
+  // time stays readable so summary footers (and later re-folds of ancestor
+  // ranges) keep real arrival times. Drop only entries whose ref is neither
+  // live nor claimed by any block's effective set (host-deleted/absorbed
+  // messages with no archive record).
+  if (result.timeSnapshot !== undefined && Object.keys(result.timeSnapshot).length > 0) {
+    const blockClaimedRefs = new Set<string>();
+    for (const block of result.blocks) {
+      for (const id of block.effectiveMessageIds) {
+        const ref = result.messageRefs.byRaw[id];
+        if (typeof ref === "string") blockClaimedRefs.add(ref);
+      }
+    }
+    const prunedTimes: Record<string, number> = {};
+    for (const [ref, t] of Object.entries(result.timeSnapshot)) {
+      if (liveRefs.has(ref) || blockClaimedRefs.has(ref)) prunedTimes[ref] = t;
+    }
+    result.timeSnapshot = prunedTimes;
   }
 
   const consumedBlockIds = new Set<string>();

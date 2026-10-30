@@ -36,6 +36,17 @@ test("mergeCompress: all undefined yields all-undefined settings", () => {
     assert.equal(hasCompressSettings(merged), false);
 });
 
+test("#4313: CompressSettings.timestamps maps to kernel renderTimestamps, unset inherits/off", () => {
+    const base = defaultConfig(200000);
+    assert.equal(base.renderTimestamps, undefined, "kernel default stays off (byte-stable wire)");
+    const on = applyCompressSettings(base, 200000, { timestamps: true });
+    assert.equal(on.renderTimestamps, true);
+    const off = applyCompressSettings(on, 200000, {});
+    assert.equal(off.renderTimestamps, true, "unset at deeper level inherits the base value");
+    const fromFile = applyCompressSettings(base, 200000, { timestamps: false });
+    assert.equal(fromFile.renderTimestamps, false, "explicit false disables");
+});
+
 test("hasCompressSettings: true when any field set", () => {
     assert.equal(hasCompressSettings({}), false);
     assert.equal(hasCompressSettings({ nudgeGrowthTokens: 50000 }), true);

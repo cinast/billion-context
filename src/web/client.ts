@@ -3858,6 +3858,7 @@ if (d.keepalive) kv(parts, t("det.keepalive"), d.keepalive.tierLabel + " · " + 
             updateNudgeNote();
             refreshTierInputs();
             prm.value = String(cp && typeof cp.preserveRecentMessages === "number" ? cp.preserveRecentMessages : PRM_KERNEL_DEFAULT);
+            tsRow.inp.checked = cp?.timestamps === true;
             ptInp.value = (cp && Array.isArray(cp.protectedTools)) ? cp.protectedTools.join(", ") : "";
             const nv = (cp && Array.isArray(cp.neverPreserveRecentTools)) ? cp.neverPreserveRecentTools : null;
             neInp.value = nv ? nv.filter((x) => typeof x === "string").join(", ") : "";
@@ -3966,6 +3967,25 @@ if (d.keepalive) kv(parts, t("det.keepalive"), d.keepalive.tierLabel + " · " + 
         abHint.className = "dim small";
         abHint.textContent = t("cfg.q_absorb_hint");
         abRow.ctl.appendChild(abHint);
+        // #4313: compress.timestamps — arrival times on <acp> tags and
+        // [folded A → B UTC] footers on summary carriers.
+        const tsRow = row("quick-timestamps", t("cfg.q_timestamps"));
+        qCtrls.push(tsRow.inp);
+        tsRow.inp.addEventListener("change", () => commit((d) => {
+            const c = compressOf(d);
+            if (tsRow.inp.checked) {
+                if (!c) d.compress = {};
+                const c2 = compressOf(d);
+                if (c2) c2.timestamps = true;
+            } else if (c) {
+                delete c.timestamps;
+                if (Object.keys(c).length === 0) delete d.compress;
+            }
+        }));
+        const tsHint = document.createElement("span");
+        tsHint.className = "dim small";
+        tsHint.textContent = t("cfg.q_timestamps_hint");
+        tsRow.ctl.appendChild(tsHint);
         const packSel = document.createElement("select");
         packSel.className = "field-input mono";
         qCtrls.push(packSel);

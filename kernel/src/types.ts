@@ -248,6 +248,14 @@ export interface CompressionState {
    *  provider prefix cache. Keyed by ref (not raw id): refs survive restarts
    *  and omp live-N raw-id replacement. */
   tokenSnapshot: Record<string, number>;
+  /** #4313: first-seen wall-clock (epoch ms) per message ref — the message's
+   *  arrival time, frozen once at ref mint and read forever (same discipline
+   *  as tokenSnapshot). Rendering (`at="..."` on ref tags, folded-range
+   *  footers on summary carriers) is gated by Config.renderTimestamps; the
+   *  freeze itself is unconditional so enabling the flag mid-session yields
+   *  real arrival times instead of "now". Optional: pre-#4313 persisted
+   *  states lack it. */
+  timeSnapshot?: Record<string, number>;
   nudge: NudgeState;
   stats: CompressionStats;
   /** Instant tool-result absorption records. Optional: pre-absorb persisted states lack it. */
@@ -486,6 +494,12 @@ export interface Config {
    *  exactly the messages that carry no toolName. Must be pure and cheap: it
    *  runs once per message per protection scan. */
   messagePathOf?: (msg: CoreMessage) => string | undefined;
+  /** #4313: render arrival timestamps — `at="YYYY-MM-DD HH:mm"` (UTC, minute
+   *  precision) appended inside <acp> ref tags, and a `[folded A → B UTC]`
+   *  footer line on summary carriers. Default off: byte-stable with every
+   *  pre-#4313 wire. One-time prefix-cache flush when toggled on
+   *  mid-session. */
+  renderTimestamps?: boolean;
   /** Tool-name patterns (glob suffix allowed) protected in their LATEST
    *  instance only: the newest matching tool-call and its paired tool-result
    *  are protected from compression; older instances remain compressible. For

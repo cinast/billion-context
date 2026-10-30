@@ -1657,6 +1657,25 @@ export class SessionStore {
                     this.log("info", `[persist] remapped ${moves.length} token-snapshot entries onto ledger-aligned refs for ${session.id} (#4599)`);
                 }
             }
+            // #4313: arrival times are keyed by ref too — without the same
+            // remap, alignment would re-point tags at the WRONG message's
+            // time (same corruption class the token remap prevents).
+            const timeSnap = (state as { timeSnapshot?: Record<string, number> }).timeSnapshot;
+            if (timeSnap && outcome.superseded.size > 0) {
+                const byRawNow = state.messageRefs.byRaw;
+                const timeMoves: Array<[oldRef: string, newRef: string, t: number]> = [];
+                for (const [oldRef, rawId] of outcome.superseded) {
+                    const t = timeSnap[oldRef];
+                    const newRef = byRawNow[rawId];
+                    if (t === undefined || newRef === undefined || newRef === oldRef) continue;
+                    timeMoves.push([oldRef, newRef, t]);
+                }
+                if (timeMoves.length > 0) {
+                    for (const [oldRef] of timeMoves) delete timeSnap[oldRef];
+                    for (const [, newRef, t] of timeMoves) timeSnap[newRef] = t;
+                    this.log("info", `[persist] remapped ${timeMoves.length} time-snapshot entries onto ledger-aligned refs for ${session.id} (#4313/#4599)`);
+                }
+            }
             state.refLedgerAligned = true;
             this.log("info", `[persist] ledger-aligned refs for ${session.id}: kept=${outcome.kept} restamped=${outcome.restamped} rehomed=${outcome.rehomed} blocked=${outcome.blocked} superseded=${outcome.superseded.size} (#4316 PR3/3)`);
             this.scheduleSave(session);

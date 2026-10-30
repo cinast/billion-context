@@ -1,6 +1,7 @@
 import type { CoreMessage, CompressionState, MessageRefMap } from "./types.js";
 import { refForRaw, BLOCKED_REF } from "./refs.js";
 import { thinkingTokenValue } from "./tokenize.js";
+import { formatUtcMinute } from "./time-fmt.js";
 import type { PipelineNode, PipelineContext, NodeIO } from "./pipeline.js";
 
 /**
@@ -42,7 +43,7 @@ const GT = "\x3e";
 const TAG_OPEN = LT + "acp ";
 const TAG_CLOSE = LT + "/acp" + GT;
 
-function acpTag(ref: string, tokens: number, type: string): string {
+function acpTag(ref: string, tokens: number, type: string, at?: string): string {
   return (
     TAG_OPEN +
     'tokens="' +
@@ -50,6 +51,7 @@ function acpTag(ref: string, tokens: number, type: string): string {
     '" type="' +
     type +
     '"' +
+    (at !== undefined ? ' at="' + at + '"' : "") +
     GT +
     ref +
     TAG_CLOSE
@@ -63,6 +65,8 @@ function renderMessage(
   strategy: RenderStrategy,
   snapshot: Record<string, number> | null = null,
   deferred: ReadonlySet<string> | null = null,
+  timeSnapshot: Record<string, number> | null = null,
+  timestamps = false,
 ): CoreMessage {
   const ref = refForRaw(map, message.id);
   if (!ref || ref === BLOCKED_REF) return message;
@@ -102,7 +106,15 @@ function renderMessage(
     : countTokens(cleanText);
   const tokens = textTokens + thinkingTokenValue(message.thinkingTokens);
   const type = classifyType(message);
-  const prefix = acpTag(ref, tokens, type) + "\n";
+  // #4313: arrival stamp, read-only — the freeze happened at ref mint
+  // (assign-refs node). A ref with no frozen time (pre-#4313 history) renders
+  // UNMARKED rather than guessing "now" (rejected option A for legacy
+  // history in the issue).
+  const at =
+    timestamps && timeSnapshot !== null && timeSnapshot[ref] !== undefined
+      ? formatUtcMinute(timeSnapshot[ref]!)
+      : undefined;
+  const prefix = acpTag(ref, tokens, type, at) + "\n";
 
   if (!cleanText) return { ...message, text: prefix };
   return { ...message, text: prefix + cleanText };
@@ -113,6 +125,7 @@ export function renderVisibleRefs(
   state: CompressionState,
   countTokens: (text: string) => number = (text) => Math.ceil(text.length / 4),
   strategy: RenderStrategy = "all",
+  timestamps = false,
 ): CoreMessage[] {
   // Legacy behavior: recompute tokens every render (snapshot = null).
   const map = state.messageRefs;
@@ -120,7 +133,16 @@ export function renderVisibleRefs(
     ? new Set(state.renderDeferredRefs)
     : null;
   return messages.map((message) =>
-    renderMessage(message, map, countTokens, strategy, null, deferred),
+    renderMessage(
+      message,
+      map,
+      countTokens,
+      strategy,
+      null,
+      deferred,
+      state.timeSnapshot ?? null,
+      timestamps,
+    ),
   );
 }
 
@@ -138,14 +160,27 @@ export function renderWithSnapshot(
   state: CompressionState,
   countTokens: (text: string) => number = (text) => Math.ceil(text.length / 4),
   strategy: RenderStrategy = "all",
+  timestamps = false,
 ): RenderWithSnapshotResult {
   const map = state.messageRefs;
   const snapshot = { ...(state.tokenSnapshot ?? {}) };
   const deferred = state.renderDeferredRefs
     ? new Set(state.renderDeferredRefs)
     : null;
+  // #4313: read-only view of the frozen arrival times (stamped upstream by
+  // the assign-refs node in the same turn).
+  const timeSnapshot = state.timeSnapshot ?? null;
   const rendered = messages.map((message) =>
-    renderMessage(message, map, countTokens, strategy, snapshot, deferred),
+    renderMessage(
+      message,
+      map,
+      countTokens,
+      strategy,
+      snapshot,
+      deferred,
+      timeSnapshot,
+      timestamps,
+    ),
   );
   return { messages: rendered, tokenSnapshot: snapshot };
 }
@@ -160,6 +195,7 @@ export function createRenderRefsNode(strategy: RenderStrategy): PipelineNode {
         io.state,
         ctx.countTokens,
         strategy,
+        ctx.config.renderTimestamps === true,
       );
       // Write the snapshot back only when it grew: steady-state (all hits)
       // must not churn the state object and force an adapter save every turn.

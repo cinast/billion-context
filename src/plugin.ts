@@ -1473,6 +1473,9 @@ export async function handlePluginFork(payload: string, res: ServerResponse): Pr
                 if (ref !== null) {
                     child.state.messageRefs.byRef[ref] = rawId;
                     if (parent.state.tokenSnapshot[ref] !== undefined) child.state.tokenSnapshot[ref] = parent.state.tokenSnapshot[ref];
+                    if (parent.state.timeSnapshot?.[ref] !== undefined) {
+                        (child.state.timeSnapshot ??= {})[ref] = parent.state.timeSnapshot[ref]!;
+                    }
                 }
             }
             child.state.nextBlockId = parent.state.nextBlockId;

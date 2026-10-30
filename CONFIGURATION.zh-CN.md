@@ -267,6 +267,7 @@
 | `compress.nudgeModelDecided` | boolean | off (unset) | — | 模型自决的压缩时机（#2228）：tier-1 提醒触发时，先通过一次走会话缓存前缀的短 side call 问模型——以当前任务为前提，现在压缩是否划算。严格 JSON 的 "yes" 会注入带程序最终确定范围的明确压缩指令；"no"、格式错误或超时则本轮不注入任何内容。EMERGENCY 档与 tier≥2 蒸馏始终保留原有 advisory。默认关闭，需显式开启。 |
 | `compress.nudgeDecisionMaxTokens` | number | 200 | — | nudgeModelDecided 所用模型决策 side call 的输出预算（token）。必须 > 0。 |
 | `compress.streamSummary` | boolean | false (unset) | — | 强制 preflight 摘要从首次尝试起就走流式（SSE）请求。要求流式的上游现在由错误驱动自学习自动处理（非流式摘要的任何 400 都会触发一次性 SSE 探测，#2494），但网关超时（如 Cloudflare HTTP 524）永远无法触发自学习：在此类网关位于 bili 与源站之间时设置此项，或用于省去一次探测往返。 |
+| `compress.timestamps` | boolean | false（不设） | — | 渲染消息到达时间戳（#4313）：每个已渲染的 ref 标签带 `at="YYYY-MM-DD HH:mm"`（UTC、分钟精度），每条折叠摘要末尾带覆盖区间的 `[folded A → B UTC]` 时间范围。开启时一次性前缀缓存冲刷；开启之前的历史不打标。 |
 | `compress.preserveRecentMessages` | number | 3 | — | 最近的消息软保护、免于折叠。 |
 | `compress.preserveRecentTokens` | number | kernel ≈5000 | — | 最近的 token 软保护、免于折叠。 |
 | `compress.minCompressRangeChars` | number (deprecated alias: minCompressRange) | kernel ≈5000 | — | 可折叠片段的最小字符数；更短的永不折叠。 |
@@ -1392,6 +1393,14 @@ ACP 原生 agent（当前为 `pi` 扩展）会在每个进程内向代理上报�
 - **默认值：** `200`
 - **状态：** ACTIVE (#2228)
 - **说明：** `nudgeModelDecided` 开启时，模型决策 side call 的输出预算（token）。必须 > 0（非法值在配置加载时被拒绝）。
+
+#### `timestamps`
+
+- **类型：** `boolean`
+- **默认：** `false`（不设）
+- **状态：** ACTIVE（#4313）
+- **说明：** 渲染消息到达时间戳。开启后，每个已渲染的消息 ref 标签携带该消息的到达时间 `at="YYYY-MM-DD HH:mm"`（UTC、分钟精度、首见即冻结），每条渲染出的摘要载体末尾带覆盖区间的到达时间范围 `[folded 2026-10-22 06:14 → 2026-10-22 18:03 UTC]`（区间塌缩为一分钟时为单点形式）。时间冻结在渲染关闭时也无条件进行，因此中途开启能拿到部署以来所有消息的真实到达时间。早于本功能的历史消息没有冻结时间、不打标——绝不猜时间。映射到内核字段 `renderTimestamps`（acp-kernel ≥ 0.0.171）。
+- **注意：** 开启会一次性改写所有已渲染标签——下一轮产生一次性的服务商前缀缓存冲刷。对前缀缓存敏感的长会话，除非确实需要时间信号，建议保持关闭。Web UI 快捷开关已提供。
 
 #### `preserveRecentMessages`
 

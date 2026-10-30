@@ -1,4 +1,5 @@
 import { activeBlocks, coveredMessageIds } from "./state.js";
+import { formatUtcMinute } from "./time-fmt.js";
 import type { CompressionState, CoreMessage } from "./types.js";
 
 export const SUMMARY_HEADER = "[Compressed conversation section]";
@@ -109,6 +110,9 @@ export function isRenderedSummaryMessage(
 
 export interface PruneOptions {
   injectSummaries?: boolean;
+  /** #4313: append `[folded A → B UTC]` footers (arrival-time range of the
+   *  block's anchor ids) to rendered summary carriers. */
+  renderTimestamps?: boolean;
   /**
    * Chronological head anchoring for views with NO provider prefix cache at
    * stake (session handoff/restore docs). Default (false) is the pin-safe
@@ -203,6 +207,7 @@ export function prune(
             ? lastUserIndex
             : messages.length,
         visibleCompressCallIds,
+        options.renderTimestamps === true,
       )
     : [];
   // Summary ids of every block this session has ever created — active or
@@ -240,6 +245,10 @@ interface SummaryAnchor {
   blockId: string;
   summary: string;
   topic?: string;
+  /** #4313: pre-formatted arrival-time footer of the block's anchor range
+   *  (`[folded A → B UTC]`); undefined when timestamps are off or no anchor
+   *  id carries a frozen time (pre-#4313 history). */
+  timeFooter?: string;
   insertAt: number;
   /** True when no anchor id was present in the input (the substrate is off
    *  the wire). Unresolved anchors park before the newest user message and
@@ -251,6 +260,35 @@ interface SummaryAnchor {
   unresolved?: boolean;
 }
 
+/** #4313: `[folded A → B UTC]` over the anchor ids' frozen arrival times
+ *  (single point when min == max). Deterministic — read-only over
+ *  timeSnapshot and the immutable block record. */
+function summaryTimeFooter(
+  state: CompressionState,
+  block: { directMessageIds?: string[]; effectiveMessageIds: string[] },
+  renderTimestamps: boolean,
+): string | undefined {
+  if (!renderTimestamps) return undefined;
+  const ids =
+    block.directMessageIds && block.directMessageIds.length > 0
+      ? block.directMessageIds
+      : block.effectiveMessageIds;
+  const times = state.timeSnapshot;
+  if (!times) return undefined;
+  let min: number | undefined;
+  let max: number | undefined;
+  for (const id of ids) {
+    const t = times[state.messageRefs.byRaw[id] ?? ""];
+    if (typeof t !== "number") continue;
+    if (min === undefined || t < min) min = t;
+    if (max === undefined || t > max) max = t;
+  }
+  if (min === undefined || max === undefined) return undefined;
+  return min === max
+    ? `[folded ${formatUtcMinute(min)} UTC]`
+    : `[folded ${formatUtcMinute(min)} → ${formatUtcMinute(max)} UTC]`;
+}
+
 function collectSummaryAnchors(
   state: CompressionState,
   baseIndexById: Map<string, number>,
@@ -260,6 +298,7 @@ function collectSummaryAnchors(
   // blocks created by one of these skip their anchor render (see the
   // collection site above for the rationale and the safety conditions).
   visibleCompressCallIds: Set<string>,
+  renderTimestamps: boolean,
 ): SummaryAnchor[] {
   const anchors: SummaryAnchor[] = [];
   for (const block of activeBlocks(state)) {
@@ -269,6 +308,12 @@ function collectSummaryAnchors(
     // rebuildMessages via knownSummaryIds and NOT re-injected here.
     if (block.compressCallId && visibleCompressCallIds.has(block.compressCallId))
       continue;
+    // #4313: arrival-time footer over the block's DIRECT range — the same
+    // id set the anchor position uses below (legacy blocks fall back to the
+    // effective set). Refs without a frozen time (pre-#4313 history) are
+    // skipped, not guessed at; no times at all → no footer.
+    const footer = summaryTimeFooter(state, block, renderTimestamps);
+
     // Prefer the position of an already-rendered summary (hosts may pass a
     // previously-pruned view): keeps the summary stable in place instead of
     // jumping to index 0 when the raw ids are no longer in the input.
@@ -278,6 +323,7 @@ function collectSummaryAnchors(
         blockId: block.blockId,
         summary: block.summary,
         topic: block.topic,
+        timeFooter: footer,
         insertAt: existingIndex,
       });
       continue;
@@ -307,6 +353,7 @@ function collectSummaryAnchors(
       blockId: block.blockId,
       summary: block.summary,
       topic: block.topic,
+      timeFooter: footer,
       // Unresolved (no anchor id present in this input): park before the
       // newest user message — see prune() for the #3640/#2733 reasoning.
       // Tail-parking (the pre-#3640 behavior) let stale summaries land after
@@ -550,7 +597,10 @@ function renderSummary(anchor: SummaryAnchor): CoreMessage {
   const topicLine = anchor.topic
     ? `${SUMMARY_HEADER} — ${anchor.topic}`
     : SUMMARY_HEADER;
-  const text = body.length === 0 ? topicLine : `${topicLine}\n${body}`;
+  const text =
+    body.length === 0
+      ? topicLine
+      : `${topicLine}\n${body}${anchor.timeFooter ? `\n${anchor.timeFooter}` : ""}`;
   return {
     id: summaryMessageId(anchor.blockId),
     role: "system",

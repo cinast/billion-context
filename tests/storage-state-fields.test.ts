@@ -65,6 +65,15 @@ test("mechanism: every field of a fresh state is covered by the derived list (no
             `createInitialState emits "${key}" but COMPRESSION_STATE_FIELDS lacks it — add it to mergeState's literal (src/state-hydration.ts)`,
         );
     }
-    // And the list is exactly the merge output — nothing stale either.
-    assert.deepEqual([...COMPRESSION_STATE_FIELDS], Object.keys(mergeState(createInitialState())));
+    // And the list is exactly the merge output plus the documented optional
+    // appendix — nothing stale either. #4313: fields that are legitimately
+    // ABSENT from a fresh state until first use (timeSnapshot: frozen at the
+    // first ref mint) can never appear in the keys() scan, so they ride an
+    // explicit appendix instead — kstate_json round-trips them generically.
+    const optionalAppendix = ["timeSnapshot"] as const;
+    const mergeKeys = Object.keys(mergeState(createInitialState()));
+    assert.deepEqual(
+        [...COMPRESSION_STATE_FIELDS],
+        [...mergeKeys, ...optionalAppendix.filter((k) => !mergeKeys.includes(k))],
+    );
 });

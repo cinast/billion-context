@@ -52,6 +52,14 @@ export const EXCEPTIONS: readonly SubsetException[] = [
   {
     file: "kernel/src/compress.ts",
     code: "ENV_ACCESS",
+    fn: "run",
+    detail: "Date.now",
+    reason:
+      "#4313 assign-refs node: time[ref] = Date.now() — first-seen wall-clock freeze per minted ref, same class as the block createdAt stamp above; orthogonal to every verified invariant, modeled as an unconstrained symbolic integer.",
+  },
+  {
+    file: "kernel/src/compress.ts",
+    code: "ENV_ACCESS",
     fn: "processTurn",
     detail: "console.warn",
     reason:

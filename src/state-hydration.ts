@@ -33,6 +33,12 @@ export function mergeState(parsed: CompressionState): CompressionState {
         nextBlockId: parsed.nextBlockId ?? fresh.nextBlockId,
         nextRunId: parsed.nextRunId ?? fresh.nextRunId,
         tokenSnapshot: parsed.tokenSnapshot ?? fresh.tokenSnapshot,
+        // #4313: frozen arrival times per ref — restart must not lose them
+        // (tags and summary footers re-render from this map). ABSENCE-
+        // PRESERVING: legacy states must load to their pinned digests.
+        ...(parsed.timeSnapshot !== undefined
+          ? { timeSnapshot: parsed.timeSnapshot }
+          : {}),
         lastPassIds: parsed.lastPassIds ?? fresh.lastPassIds,
         hiddenOrphanRefs: parsed.hiddenOrphanRefs ?? fresh.hiddenOrphanRefs,
         // #2362: without this a restart forgets which refs are dead and the
@@ -73,5 +79,10 @@ export function mergeState(parsed: CompressionState): CompressionState {
  * (#4192). Consumers: kstate_json serialization order (storage/ingest.ts),
  * unified view rebuild, digest key order.
  */
-export const COMPRESSION_STATE_FIELDS: readonly (keyof CompressionState)[] =
-    Object.keys(mergeState(createInitialState())) as (keyof CompressionState)[];
+export const COMPRESSION_STATE_FIELDS: readonly (keyof CompressionState)[] = [
+    ...Object.keys(mergeState(createInitialState())) as (keyof CompressionState)[],
+    // #4313: optional — absent from a fresh state until the first ref mint
+    // freezes a time, so it never appears in the keys() scan above; enumerated
+    // explicitly so kstate_json round-trips it through the unified store.
+    "timeSnapshot",
+];

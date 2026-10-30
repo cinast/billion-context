@@ -1056,15 +1056,33 @@ const assignRefsNode: PipelineNode = {
     const migratedRefs = refResult.migratedIds
       .map((id) => refResult.map.byRaw[id])
       .filter((r): r is string => typeof r === "string" && r !== BLOCKED_REF);
-    const state = migratedRefs.length
-      ? {
-          ...io.state,
-          messageRefs: refResult.map,
-          renderDeferredRefs: [
-            ...new Set([...(io.state.renderDeferredRefs ?? []), ...migratedRefs]),
-          ],
-        }
-      : { ...io.state, messageRefs: refResult.map };
+    // #4313: freeze each ref's first-seen wall-clock alongside the ref map —
+    // refs are minted exactly once per message identity, so this is the
+    // message's arrival time. Unconditional (Config.renderTimestamps gates
+    // RENDERING only): enabling the flag mid-session yields real arrival
+    // times for everything seen since deployment, never "now" stamps on old
+    // messages.
+    let time = { ...(io.state.timeSnapshot ?? {}) };
+    let timeChanged = false;
+    for (const message of io.messages) {
+      if (!message.id || message.id.startsWith(RETRIEVED_ID_PREFIX)) continue;
+      const ref = refResult.map.byRaw[message.id];
+      if (!ref || ref === BLOCKED_REF || time[ref] !== undefined) continue;
+      time[ref] = Date.now();
+      timeChanged = true;
+    }
+    const state = {
+      ...(migratedRefs.length
+        ? {
+            ...io.state,
+            messageRefs: refResult.map,
+            renderDeferredRefs: [
+              ...new Set([...(io.state.renderDeferredRefs ?? []), ...migratedRefs]),
+            ],
+          }
+        : { ...io.state, messageRefs: refResult.map }),
+      ...(timeChanged ? { timeSnapshot: time } : {}),
+    };
     return { ...io, state };
   },
 };
@@ -1085,6 +1103,7 @@ const pruneNode: PipelineNode = {
       ...io,
       messages: prune(io.messages, io.state, {
         isCompressTool: ctx.config.isCompressTool,
+        renderTimestamps: ctx.config.renderTimestamps === true,
       }),
       // #2663: keep the pre-prune resent array reachable so recommend can
       // judge foldability on the same input class applyCompression sees.

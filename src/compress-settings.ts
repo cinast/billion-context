@@ -336,6 +336,9 @@ export function applyCompressSettings(base: Config, limit: number, s: CompressSe
         tiers,
         preserveRecentMessages: s.preserveRecentMessages ?? base.preserveRecentMessages,
         preserveRecentTokens: s.preserveRecentTokens ?? base.preserveRecentTokens,
+        // #4313: absent at every level leaves the kernel default (off) —
+        // byte-stable wire for pre-#4313 sessions.
+        renderTimestamps: s.timestamps ?? (base as ResolvedKernelConfig).renderTimestamps,
         compress: {
             ...base.compress,
             minCompressRange: s.minCompressRangeChars ?? s.minCompressRange ?? base.compress.minCompressRange,

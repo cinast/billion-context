@@ -286,6 +286,14 @@ export type CompressSettings = {
     /** #2228: output budget (tokens) of the decision side call. Default 200
      *  (same ceiling class as SIDE_REQUEST_MAX_TOKENS). Must be > 0. */
     nudgeDecisionMaxTokens?: number;
+    /** #4313: render arrival timestamps — `at="YYYY-MM-DD HH:mm"` (UTC,
+     *  minute precision) inside <acp> ref tags, and a `[folded A → B UTC]`
+     *  footer on summary carriers giving the arrival-time range of the
+     *  folded span. Off by default: enabling rewrites every rendered tag
+     *  once (a one-time provider prefix-cache flush). History that predates
+     *  the setting renders unmarked (no guessed times). Maps to kernel
+     *  `renderTimestamps` (acp-kernel >= 0.0.171). */
+    timestamps?: boolean;
     /** Trailing messages never offered for compression
      *  (kernel `preserveRecentMessages`). */
     preserveRecentMessages?: number;
